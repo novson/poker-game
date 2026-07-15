@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 8080
+      POKER_ALLOWED_ORIGINS: http://localhost:8088
+    networks:
+      - poker-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8088:80"
+    networks:
+      - poker-net
+
+networks:
+  poker-net:
+    driver: bridge
+
