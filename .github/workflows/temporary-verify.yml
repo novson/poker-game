@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/temporary-verify.yml'
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
