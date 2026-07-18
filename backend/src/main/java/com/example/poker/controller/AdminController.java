@@ -2,6 +2,7 @@ package com.example.poker.controller;
 
 import com.example.poker.dto.Requests;
 import com.example.poker.dto.TableViews;
+import com.example.poker.service.PokerSettings;
 import com.example.poker.service.TableService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -44,7 +45,9 @@ public class AdminController {
             @RequestHeader(value = "X-Admin-Token", required = false) String token,
             @Valid @RequestBody Requests.UpdateSettings request) {
         authorize(token);
-        return service.updateSettings(request.startingChips());
+        return service.updateSettings(new PokerSettings.Values(
+                request.totalChips(), request.minBuyIn(), request.defaultBuyIn(), request.maxBuyIn(),
+                request.smallBlind(), request.bigBlind()));
     }
 
     @GetMapping("/tables")

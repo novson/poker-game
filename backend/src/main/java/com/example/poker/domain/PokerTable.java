@@ -14,7 +14,10 @@ public final class PokerTable {
     private final String name;
     private final int maxPlayers;
     private final boolean privateTable;
+    private final int totalChips;
+    private final int minBuyIn;
     private final int startingChips;
+    private final int maxBuyIn;
     private final int smallBlind;
     private final int bigBlind;
     private final Instant createdAt = Instant.now();
@@ -32,26 +35,40 @@ public final class PokerTable {
     private String message = "等待玩家加入";
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
-        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, false, Deck::new);
+        this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
+                smallBlind, bigBlind, false, Deck::new);
     }
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
                       boolean privateTable) {
-        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, privateTable, Deck::new);
+        this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
+                smallBlind, bigBlind, privateTable, Deck::new);
+    }
+
+    public PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
+                      int defaultBuyIn, int maxBuyIn, int smallBlind, int bigBlind,
+                      boolean privateTable) {
+        this(id, name, maxPlayers, totalChips, minBuyIn, defaultBuyIn, maxBuyIn,
+                smallBlind, bigBlind, privateTable, Deck::new);
     }
 
     PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
                Supplier<Deck> deckFactory) {
-        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, false, deckFactory);
+        this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
+                smallBlind, bigBlind, false, deckFactory);
     }
 
-    private PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
+    private PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
+                       int defaultBuyIn, int maxBuyIn, int smallBlind, int bigBlind,
                        boolean privateTable, Supplier<Deck> deckFactory) {
         this.id = id;
         this.name = name;
         this.maxPlayers = maxPlayers;
         this.privateTable = privateTable;
-        this.startingChips = startingChips;
+        this.totalChips = totalChips;
+        this.minBuyIn = minBuyIn;
+        this.startingChips = defaultBuyIn;
+        this.maxBuyIn = maxBuyIn;
         this.smallBlind = smallBlind;
         this.bigBlind = bigBlind;
         this.deckFactory = deckFactory;
@@ -61,7 +78,11 @@ public final class PokerTable {
     public String name() { return name; }
     public int maxPlayers() { return maxPlayers; }
     public boolean privateTable() { return privateTable; }
+    public int totalChips() { return totalChips; }
+    public int minBuyIn() { return minBuyIn; }
     public int startingChips() { return startingChips; }
+    public int defaultBuyIn() { return startingChips; }
+    public int maxBuyIn() { return maxBuyIn; }
     public int smallBlind() { return smallBlind; }
     public int bigBlind() { return bigBlind; }
     public Instant createdAt() { return createdAt; }
@@ -92,26 +113,33 @@ public final class PokerTable {
     }
 
     public synchronized PlayerState join(String nickname) {
-        PlayerState player = addPlayer(nickname, false);
+        return join(nickname, startingChips);
+    }
+
+    public synchronized PlayerState join(String nickname, Integer buyIn) {
+        PlayerState player = addPlayer(nickname, false, buyIn == null ? startingChips : buyIn);
         message = nickname + " 加入了牌桌";
         return player;
     }
 
     public synchronized PlayerState joinAi(String nickname) {
         if (!privateTable) throw new IllegalStateException("只有私人牌桌可以加入 AI");
-        PlayerState player = addPlayer(nickname, true);
+        PlayerState player = addPlayer(nickname, true, startingChips);
         message = nickname + " 已就座";
         return player;
     }
 
-    private PlayerState addPlayer(String nickname, boolean ai) {
+    private PlayerState addPlayer(String nickname, boolean ai, int buyIn) {
         if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
             throw new IllegalStateException("牌局进行中，暂不能加入");
         if (players.size() >= maxPlayers) throw new IllegalStateException("牌桌已满");
         if (players.stream().anyMatch(player -> player.nickname().equalsIgnoreCase(nickname)))
             throw new IllegalArgumentException("昵称已被使用");
+        if (buyIn < minBuyIn || buyIn > maxBuyIn)
+            throw new IllegalArgumentException("带入筹码必须在 " + minBuyIn + " 到 " + maxBuyIn + " 之间");
+        if (buyIn > totalChips) throw new IllegalArgumentException("带入筹码不能超过单次总筹码");
         PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), nickname,
-                firstFreeSeat(), startingChips, ai);
+                firstFreeSeat(), buyIn, totalChips - buyIn, ai);
         players.add(player);
         players.sort(Comparator.comparingInt(PlayerState::seat));
         return player;
@@ -143,10 +171,33 @@ public final class PokerTable {
         return player;
     }
 
+    public synchronized void topUp(UUID playerId, int amount) {
+        ensureBetweenHands();
+        PlayerState player = requirePlayer(playerId);
+        int resulting = player.chips() + amount;
+        if (resulting > maxBuyIn)
+            throw new IllegalArgumentException("补码后牌桌筹码不能超过最高带入 " + maxBuyIn);
+        if (resulting < minBuyIn)
+            throw new IllegalArgumentException("补码后至少需要达到最低带入 " + minBuyIn);
+        player.topUp(amount);
+        message = player.nickname() + " 补码 " + amount;
+    }
+
+    public synchronized void cashOut(UUID playerId, int amount) {
+        ensureBetweenHands();
+        PlayerState player = requirePlayer(playerId);
+        int remaining = player.chips() - amount;
+        if (remaining != 0 && remaining < minBuyIn)
+            throw new IllegalArgumentException("回收后需保留至少 " + minBuyIn + "，或一次全部回收");
+        player.cashOut(amount);
+        message = player.nickname() + " 回收筹码 " + amount;
+    }
+
     public synchronized void start(UUID playerId) {
         requirePlayer(playerId);
         if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
             throw new IllegalStateException("牌局已经开始");
+        autoTopUpAi();
         long eligible = players.stream().filter(player -> player.chips() > 0).count();
         if (eligible < 2) throw new IllegalStateException("至少需要两名还有筹码的玩家");
 
@@ -374,6 +425,19 @@ public final class PokerTable {
 
     private void postBlind(PlayerState player, int blind) {
         pot += player.pay(Math.min(player.chips(), blind));
+    }
+
+    private void ensureBetweenHands() {
+        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
+            throw new IllegalStateException("只能在两局之间补码或回收筹码");
+    }
+
+    private void autoTopUpAi() {
+        for (PlayerState player : players) {
+            if (!player.ai() || player.reserveChips() == 0 || player.chips() >= startingChips) continue;
+            int target = Math.min(startingChips, player.chips() + player.reserveChips());
+            if (target >= minBuyIn) player.topUp(target - player.chips());
+        }
     }
 
     private int firstFreeSeat() {

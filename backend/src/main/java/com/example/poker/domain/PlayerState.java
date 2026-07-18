@@ -11,6 +11,7 @@ public final class PlayerState {
     private final int seat;
     private final boolean ai;
     private int chips;
+    private int reserveChips;
     private int streetBet;
     private int handBet;
     private boolean acted;
@@ -19,11 +20,17 @@ public final class PlayerState {
     private final List<Card> holeCards = new ArrayList<>(2);
 
     public PlayerState(UUID id, UUID reconnectToken, String nickname, int seat, int chips, boolean ai) {
+        this(id, reconnectToken, nickname, seat, chips, 0, ai);
+    }
+
+    public PlayerState(UUID id, UUID reconnectToken, String nickname, int seat, int chips,
+                       int reserveChips, boolean ai) {
         this.id = id;
         this.reconnectToken = reconnectToken;
         this.nickname = nickname;
         this.seat = seat;
         this.chips = chips;
+        this.reserveChips = reserveChips;
         this.ai = ai;
     }
 
@@ -33,6 +40,8 @@ public final class PlayerState {
     public int seat() { return seat; }
     public boolean ai() { return ai; }
     public int chips() { return chips; }
+    public int reserveChips() { return reserveChips; }
+    public int totalChips() { return chips + reserveChips; }
     public int streetBet() { return streetBet; }
     public int handBet() { return handBet; }
     public boolean acted() { return acted; }
@@ -60,6 +69,22 @@ public final class PlayerState {
     }
     public void sit() { status = chips > 0 ? PlayerStatus.SITTING : PlayerStatus.OUT; }
     public void win(int amount) { chips += amount; }
+
+    public void topUp(int amount) {
+        if (amount <= 0) throw new IllegalArgumentException("补码金额必须大于 0");
+        if (amount > reserveChips) throw new IllegalArgumentException("可用备用筹码不足");
+        reserveChips -= amount;
+        chips += amount;
+        sit();
+    }
+
+    public void cashOut(int amount) {
+        if (amount <= 0) throw new IllegalArgumentException("回收金额必须大于 0");
+        if (amount > chips) throw new IllegalArgumentException("牌桌筹码不足");
+        chips -= amount;
+        reserveChips += amount;
+        sit();
+    }
 
     public int pay(int amount) {
         if (amount < 0 || amount > chips) throw new IllegalArgumentException("筹码不足");

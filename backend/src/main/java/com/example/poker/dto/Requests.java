@@ -17,12 +17,22 @@ public final class Requests {
             @NotBlank @Size(max = 16) String nickname,
             @Min(2) @Max(6) Integer maxPlayers,
             Boolean privateTable,
-            @Min(0) @Max(5) Integer aiPlayers) {}
+            @Min(0) @Max(5) Integer aiPlayers,
+            @Min(1) @Max(10_000_000) Integer buyIn) {}
 
-    public record JoinTable(@NotBlank @Size(max = 16) String nickname) {}
+    public record JoinTable(@NotBlank @Size(max = 16) String nickname,
+                            @Min(1) @Max(10_000_000) Integer buyIn) {}
     public record PlayerCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken) {}
+    public record ChipCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken,
+                              @Min(1) @Max(10_000_000) int amount) {}
     public record PlayerAction(@NotNull UUID playerId, @NotNull UUID reconnectToken,
                                @NotNull ActionType type, Integer raiseTo) {}
-    public record UpdateSettings(@Min(100) @Max(1_000_000) int startingChips) {}
+    public record UpdateSettings(
+            @Min(100) @Max(10_000_000) int totalChips,
+            @Min(1) @Max(10_000_000) int minBuyIn,
+            @Min(1) @Max(10_000_000) int defaultBuyIn,
+            @Min(1) @Max(10_000_000) int maxBuyIn,
+            @Min(1) @Max(100_000) int smallBlind,
+            @Min(2) @Max(100_000) int bigBlind) {}
 }
 

@@ -19,8 +19,6 @@ import java.util.concurrent.atomic.AtomicLong;
 
 @Service
 public class TableService {
-    private static final int SMALL_BLIND = 10;
-    private static final int BIG_BLIND = 20;
     private static final List<String> AI_NAMES = List.of("AI·小河", "AI·阿福", "AI·梅花", "AI·红桃", "AI·黑桃");
 
     private final ConcurrentMap<UUID, PokerTable> tables = new ConcurrentHashMap<>();
@@ -54,15 +52,22 @@ public class TableService {
 
     public TableViews.SessionView create(String tableName, String nickname, Integer maxPlayers,
                                          Boolean privateTable, Integer aiPlayers) {
+        return create(tableName, nickname, maxPlayers, privateTable, aiPlayers, null);
+    }
+
+    public TableViews.SessionView create(String tableName, String nickname, Integer maxPlayers,
+                                         Boolean privateTable, Integer aiPlayers, Integer buyIn) {
         int seats = maxPlayers == null ? 6 : maxPlayers;
         boolean isPrivate = Boolean.TRUE.equals(privateTable);
         int aiCount = aiPlayers == null ? 0 : aiPlayers;
         if (aiCount > 0 && !isPrivate) throw new IllegalArgumentException("AI 选手仅支持私人牌桌");
         if (aiCount >= seats) throw new IllegalArgumentException("至少需要为真人保留一个座位");
 
+        PokerSettings.Values values = settings.values();
         PokerTable table = new PokerTable(UUID.randomUUID(), tableName.trim(), seats,
-                settings.startingChips(), SMALL_BLIND, BIG_BLIND, isPrivate);
-        PlayerState player = table.join(nickname.trim());
+                values.totalChips(), values.minBuyIn(), values.defaultBuyIn(), values.maxBuyIn(),
+                values.smallBlind(), values.bigBlind(), isPrivate);
+        PlayerState player = table.join(nickname.trim(), buyIn);
         for (int index = 0; index < aiCount; index++) table.joinAi(AI_NAMES.get(index));
         tables.put(table.id(), table);
         versions.put(table.id(), new AtomicLong());
@@ -71,9 +76,13 @@ public class TableService {
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname) {
+        return join(tableId, nickname, null);
+    }
+
+    public TableViews.SessionView join(UUID tableId, String nickname, Integer buyIn) {
         PokerTable table = requireTable(tableId);
         if (table.privateTable()) throw new IllegalArgumentException("私人牌桌不能从大厅加入");
-        PlayerState player = table.join(nickname.trim());
+        PlayerState player = table.join(nickname.trim(), buyIn);
         publish(tableId);
         return session(table, player);
     }
@@ -109,11 +118,27 @@ public class TableService {
     }
 
     public TableViews.AdminSettings settings() {
-        return new TableViews.AdminSettings(settings.startingChips());
+        return settingsView(settings.values());
     }
 
-    public TableViews.AdminSettings updateSettings(int startingChips) {
-        return new TableViews.AdminSettings(settings.updateStartingChips(startingChips));
+    public TableViews.AdminSettings updateSettings(PokerSettings.Values values) {
+        return settingsView(settings.update(values));
+    }
+
+    public TableViews.TableView topUp(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {
+        PokerTable table = requireTable(tableId);
+        table.authenticate(playerId, reconnectToken);
+        table.topUp(playerId, amount);
+        publish(tableId);
+        return TableViews.TableView.from(table, playerId);
+    }
+
+    public TableViews.TableView cashOut(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {
+        PokerTable table = requireTable(tableId);
+        table.authenticate(playerId, reconnectToken);
+        table.cashOut(playerId, amount);
+        publish(tableId);
+        return TableViews.TableView.from(table, playerId);
     }
 
     public void delete(UUID tableId) {
@@ -151,6 +176,11 @@ public class TableService {
     private TableViews.SessionView session(PokerTable table, PlayerState player) {
         return new TableViews.SessionView(player.id(), player.reconnectToken(),
                 TableViews.TableView.from(table, player.id()));
+    }
+
+    private TableViews.AdminSettings settingsView(PokerSettings.Values values) {
+        return new TableViews.AdminSettings(values.totalChips(), values.minBuyIn(), values.defaultBuyIn(),
+                values.maxBuyIn(), values.smallBlind(), values.bigBlind());
     }
 
     private PokerTable requireTable(UUID tableId) {
