@@ -3,6 +3,7 @@ package com.example.poker.service;
 import com.example.poker.domain.ActionType;
 import com.example.poker.domain.GamePhase;
 import com.example.poker.domain.PlayerState;
+import com.example.poker.domain.PlayerStatus;
 import com.example.poker.domain.PokerTable;
 import com.example.poker.dto.TableViews;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +26,7 @@ public class TableService {
     private final ConcurrentMap<UUID, AtomicLong> versions = new ConcurrentHashMap<>();
     private final SimpMessagingTemplate messaging;
     private final PokerSettings settings;
-    private final SecureRandom random = new SecureRandom();
+    private final PokerAiStrategy aiStrategy = new PokerAiStrategy(new SecureRandom(), 260);
 
     @Autowired
     public TableService(SimpMessagingTemplate messaging, PokerSettings settings) {
@@ -154,21 +155,19 @@ public class TableService {
             PlayerState ai = table.currentPlayer();
             if (ai == null || !ai.ai()) return;
 
-            int callAmount = table.callAmount(ai.id());
-            int roll = random.nextInt(100);
-            ActionType action;
-            Integer raiseTo = null;
-            if (callAmount >= ai.chips()) {
-                action = ActionType.ALL_IN;
-            } else if (callAmount > 0 && roll < 12) {
-                action = ActionType.FOLD;
-            } else if (table.canRaise(ai.id()) && roll >= 85) {
-                action = ActionType.RAISE;
-                raiseTo = table.minimumRaiseTo();
-            } else {
-                action = callAmount > 0 ? ActionType.CALL : ActionType.CHECK;
-            }
-            table.act(ai.id(), action, raiseTo);
+            int opponents = (int) table.players().stream()
+                    .filter(player -> !player.id().equals(ai.id()))
+                    .filter(player -> player.status() == PlayerStatus.ACTIVE
+                            || player.status() == PlayerStatus.ALL_IN)
+                    .count();
+            int distanceToDealer = Math.floorMod(table.dealerSeat() - ai.seat(), table.maxPlayers());
+            PokerAiStrategy.Context context = new PokerAiStrategy.Context(
+                    ai.nickname(), ai.holeCards(), table.communityCards(), opponents,
+                    table.pot(), table.callAmount(ai.id()), table.currentBet(), table.minRaise(),
+                    table.bigBlind(), ai.chips(), ai.streetBet(), table.canRaise(ai.id()),
+                    distanceToDealer <= 1);
+            PokerAiStrategy.Decision decision = aiStrategy.decide(context);
+            table.act(ai.id(), decision.action(), decision.raiseTo());
         }
         throw new IllegalStateException("AI 行动次数异常，请重新开始牌局");
     }

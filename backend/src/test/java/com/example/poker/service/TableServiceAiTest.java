@@ -36,4 +36,23 @@ class TableServiceAiTest {
         assertThat(table.phase().name()).isEqualTo("SHOWDOWN");
         assertThat(table.players().stream().mapToInt(TableViews.PlayerView::chips).sum()).isEqualTo(4_000);
     }
+
+    @Test
+    void multipleAiPlayersCompleteSeveralHandsWithoutInvalidActions() {
+        TableService service = new TableService(mock(SimpMessagingTemplate.class));
+        TableViews.SessionView session = service.create("多人 AI 压力测试", "Alice", 4, true, 3);
+        TableViews.TableView table = session.table();
+
+        for (int hand = 0; hand < 3; hand++) {
+            table = service.start(table.id(), session.playerId(), session.reconnectToken());
+            for (int actions = 0; actions < 20 && !"SHOWDOWN".equals(table.phase().name()); actions++) {
+                TableViews.PlayerView human = table.players().stream()
+                        .filter(player -> player.id().equals(session.playerId())).findFirst().orElseThrow();
+                assertThat(human.currentTurn()).isTrue();
+                table = service.act(table.id(), session.playerId(), session.reconnectToken(),
+                        ActionType.FOLD, null);
+            }
+            assertThat(table.phase().name()).isEqualTo("SHOWDOWN");
+        }
+    }
 }
