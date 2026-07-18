@@ -3,7 +3,11 @@ const jsonHeaders = { 'Content-Type': 'application/json' }
 async function request(url, options = {}) {
   const response = await fetch(url, options)
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.message || `请求失败（${response.status}）`)
+  if (!response.ok) {
+    const error = new Error(body.message || `请求失败（${response.status}）`)
+    error.status = response.status
+    throw error
+  }
   return body
 }
 
@@ -15,12 +19,15 @@ export const api = {
   joinTable: (tableId, nickname) => request(`/api/tables/${tableId}/join`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ nickname })
   }),
-  getTable: (tableId, playerId) => request(`/api/tables/${tableId}?playerId=${playerId}`),
-  start: (tableId, playerId) => request(`/api/tables/${tableId}/start`, {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId })
+  reconnect: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/reconnect`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
   }),
-  act: (tableId, playerId, type, raiseTo) => request(`/api/tables/${tableId}/actions`, {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, type, raiseTo })
+  getTable: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}?${new URLSearchParams({ playerId, reconnectToken })}`),
+  start: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/start`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
+  }),
+  act: (tableId, playerId, reconnectToken, type, raiseTo) => request(`/api/tables/${tableId}/actions`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, type, raiseTo })
   })
 }
 

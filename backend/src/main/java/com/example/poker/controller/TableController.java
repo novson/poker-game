@@ -38,18 +38,26 @@ public class TableController {
     }
 
     @GetMapping("/{tableId}")
-    public TableViews.TableView get(@PathVariable UUID tableId, @RequestParam UUID playerId) {
-        return service.get(tableId, playerId);
+    public TableViews.TableView get(@PathVariable UUID tableId, @RequestParam UUID playerId,
+                                    @RequestParam UUID reconnectToken) {
+        return service.get(tableId, playerId, reconnectToken);
+    }
+
+    @PostMapping("/{tableId}/reconnect")
+    public TableViews.SessionView reconnect(@PathVariable UUID tableId,
+                                             @Valid @RequestBody Requests.PlayerCommand request) {
+        return service.reconnect(tableId, request.playerId(), request.reconnectToken());
     }
 
     @PostMapping("/{tableId}/start")
     public TableViews.TableView start(@PathVariable UUID tableId, @Valid @RequestBody Requests.PlayerCommand request) {
-        return service.start(tableId, request.playerId());
+        return service.start(tableId, request.playerId(), request.reconnectToken());
     }
 
     @PostMapping("/{tableId}/actions")
     public TableViews.TableView act(@PathVariable UUID tableId, @Valid @RequestBody Requests.PlayerAction request) {
-        return service.act(tableId, request.playerId(), request.type(), request.raiseTo());
+        return service.act(tableId, request.playerId(), request.reconnectToken(),
+                request.type(), request.raiseTo());
     }
 }
 

@@ -16,6 +16,10 @@ public final class Deck {
         Collections.shuffle(cards, new SecureRandom());
     }
 
+    Deck(List<Card> cards) {
+        this.cards.addAll(cards);
+    }
+
     public Card deal() {
         if (cursor >= cards.size()) throw new IllegalStateException("牌堆已空");
         return cards.get(cursor++);

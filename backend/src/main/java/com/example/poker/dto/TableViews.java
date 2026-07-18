@@ -20,12 +20,14 @@ public final class TableViews {
         }
     }
 
-    public record PlayerView(UUID id, String nickname, int seat, int chips, int streetBet,
-                             String status, boolean dealer, boolean currentTurn, List<String> cards) {}
+    public record PlayerView(UUID id, String nickname, int seat, int chips, int streetBet, int handBet,
+                             String status, boolean dealer, boolean currentTurn, boolean canRaise,
+                             List<String> cards) {}
 
     public record TableView(UUID id, String name, int maxPlayers, int smallBlind, int bigBlind,
                             GamePhase phase, String phaseLabel, long handNumber, int pot, int currentBet,
-                            int minRaise, String message, List<String> communityCards, List<PlayerView> players) {
+                            int minRaise, List<Integer> pots, String message,
+                            List<String> communityCards, List<PlayerView> players) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
             List<PlayerView> playerViews = table.players().stream().map(player -> {
@@ -34,16 +36,18 @@ public final class TableViews {
                 List<String> cards = visible ? player.holeCards().stream().map(Card::toString).toList()
                         : player.holeCards().stream().map(card -> "??").toList();
                 return new PlayerView(player.id(), player.nickname(), player.seat(), player.chips(),
-                        player.streetBet(), player.status().name(), player.seat() == table.dealerSeat(),
-                        player.seat() == table.currentTurnSeat(), cards);
+                        player.streetBet(), player.handBet(), player.status().name(),
+                        player.seat() == table.dealerSeat(), player.seat() == table.currentTurnSeat(),
+                        player.raiseAllowed(), cards);
             }).toList();
             return new TableView(table.id(), table.name(), table.maxPlayers(), table.smallBlind(), table.bigBlind(),
                     table.phase(), table.phase().label(), table.handNumber(), table.pot(), table.currentBet(),
-                    table.minRaise(), table.message(), table.communityCards().stream().map(Card::toString).toList(), playerViews);
+                    table.minRaise(), table.pots(), table.message(),
+                    table.communityCards().stream().map(Card::toString).toList(), playerViews);
         }
     }
 
-    public record SessionView(UUID playerId, TableView table) {}
+    public record SessionView(UUID playerId, UUID reconnectToken, TableView table) {}
     public record TableEvent(UUID tableId, long version) {}
     public record ErrorView(String message, Instant timestamp) {}
 }

@@ -3,8 +3,11 @@ package com.example.poker.domain;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 public final class PokerTable {
     private final UUID id;
@@ -16,6 +19,7 @@ public final class PokerTable {
     private final Instant createdAt = Instant.now();
     private final List<PlayerState> players = new ArrayList<>();
     private final List<Card> communityCards = new ArrayList<>(5);
+    private final Supplier<Deck> deckFactory;
     private Deck deck;
     private GamePhase phase = GamePhase.WAITING;
     private int dealerSeat = -1;
@@ -27,12 +31,18 @@ public final class PokerTable {
     private String message = "等待玩家加入";
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
+        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, Deck::new);
+    }
+
+    PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
+               Supplier<Deck> deckFactory) {
         this.id = id;
         this.name = name;
         this.maxPlayers = maxPlayers;
         this.startingChips = startingChips;
         this.smallBlind = smallBlind;
         this.bigBlind = bigBlind;
+        this.deckFactory = deckFactory;
     }
 
     public UUID id() { return id; }
@@ -53,70 +63,99 @@ public final class PokerTable {
     public long handNumber() { return handNumber; }
     public String message() { return message; }
 
+    public synchronized List<Integer> pots() {
+        if (pot == 0) return List.of();
+        List<Integer> levels = players.stream().map(PlayerState::handBet).filter(value -> value > 0)
+                .distinct().sorted().toList();
+        List<Integer> result = new ArrayList<>();
+        int previous = 0;
+        for (int level : levels) {
+            int contributors = (int) players.stream().filter(player -> player.handBet() >= level).count();
+            int amount = (level - previous) * contributors;
+            if (amount > 0) result.add(amount);
+            previous = level;
+        }
+        return List.copyOf(result);
+    }
+
     public synchronized PlayerState join(String nickname) {
-        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN) throw new IllegalStateException("牌局进行中，暂不能加入");
+        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
+            throw new IllegalStateException("牌局进行中，暂不能加入");
         if (players.size() >= maxPlayers) throw new IllegalStateException("牌桌已满");
-        if (players.stream().anyMatch(p -> p.nickname().equalsIgnoreCase(nickname)))
+        if (players.stream().anyMatch(player -> player.nickname().equalsIgnoreCase(nickname)))
             throw new IllegalArgumentException("昵称已被使用");
-        int seat = firstFreeSeat();
-        PlayerState player = new PlayerState(UUID.randomUUID(), nickname, seat, startingChips);
+        PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), nickname, firstFreeSeat(), startingChips);
         players.add(player);
         players.sort(Comparator.comparingInt(PlayerState::seat));
         message = nickname + " 加入了牌桌";
         return player;
     }
 
+    public synchronized PlayerState authenticate(UUID playerId, UUID reconnectToken) {
+        PlayerState player = requirePlayer(playerId);
+        if (reconnectToken == null || !player.reconnectToken().equals(reconnectToken))
+            throw new IllegalArgumentException("重连凭证无效，请重新加入牌桌");
+        return player;
+    }
+
     public synchronized void start(UUID playerId) {
         requirePlayer(playerId);
-        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN) throw new IllegalStateException("牌局已经开始");
-        long eligible = players.stream().filter(p -> p.chips() > bigBlind).count();
-        if (eligible < 2) throw new IllegalStateException("至少需要两名有足够筹码的玩家");
+        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
+            throw new IllegalStateException("牌局已经开始");
+        long eligible = players.stream().filter(player -> player.chips() > 0).count();
+        if (eligible < 2) throw new IllegalStateException("至少需要两名还有筹码的玩家");
 
         handNumber++;
         phase = GamePhase.PRE_FLOP;
-        deck = new Deck();
+        deck = deckFactory.get();
         communityCards.clear();
         pot = 0;
         currentBet = 0;
         minRaise = bigBlind;
-        players.forEach(player -> player.startHand(bigBlind));
+        players.forEach(PlayerState::startHand);
         dealerSeat = nextActiveSeat(dealerSeat);
 
         List<PlayerState> active = activePlayers();
-        for (int round = 0; round < 2; round++) for (PlayerState player : active) player.addCard(deck.deal());
+        for (int round = 0; round < 2; round++) {
+            for (PlayerState player : active) player.addCard(deck.deal());
+        }
 
         int smallBlindSeat = active.size() == 2 ? dealerSeat : nextActiveSeat(dealerSeat);
         int bigBlindSeat = nextActiveSeat(smallBlindSeat);
         postBlind(playerAt(smallBlindSeat), smallBlind);
         postBlind(playerAt(bigBlindSeat), bigBlind);
-        currentBet = bigBlind;
-        players.stream().filter(p -> p.status() == PlayerStatus.ACTIVE).forEach(p -> p.setActed(false));
-        currentTurnSeat = nextActiveSeat(bigBlindSeat);
+        currentBet = players.stream().mapToInt(PlayerState::streetBet).max().orElse(0);
+        activePlayers().forEach(player -> {
+            player.setActed(false);
+            player.setRaiseAllowed(true);
+        });
         message = "第 " + handNumber + " 局开始";
+
+        if (bettingRoundComplete()) advanceStreet();
+        else currentTurnSeat = nextActionSeat(bigBlindSeat);
     }
 
     public synchronized void act(UUID playerId, ActionType type, Integer raiseTo) {
-        if (phase == GamePhase.WAITING || phase == GamePhase.SHOWDOWN) throw new IllegalStateException("当前没有进行中的牌局");
+        if (phase == GamePhase.WAITING || phase == GamePhase.SHOWDOWN)
+            throw new IllegalStateException("当前没有进行中的牌局");
         PlayerState player = requirePlayer(playerId);
         if (player.seat() != currentTurnSeat) throw new IllegalStateException("还没轮到你行动");
         if (player.status() != PlayerStatus.ACTIVE) throw new IllegalStateException("当前玩家不能行动");
 
-        int callAmount = currentBet - player.streetBet();
+        int callAmount = Math.max(0, currentBet - player.streetBet());
         switch (type) {
-            case FOLD -> { player.fold(); message = player.nickname() + " 弃牌"; }
+            case FOLD -> {
+                player.fold();
+                message = player.nickname() + " 弃牌";
+            }
             case CHECK -> {
                 if (callAmount != 0) throw new IllegalArgumentException("当前不能过牌，需要跟注或弃牌");
-                player.setActed(true);
+                completeAction(player);
                 message = player.nickname() + " 过牌";
             }
-            case CALL -> {
-                if (callAmount <= 0) throw new IllegalArgumentException("当前无需跟注，可以过牌");
-                if (callAmount >= player.chips()) throw new IllegalArgumentException("MVP 暂不支持全押/边池，请弃牌");
-                pot += player.pay(callAmount);
-                player.setActed(true);
-                message = player.nickname() + " 跟注 " + callAmount;
-            }
-            case RAISE -> handleRaise(player, raiseTo, callAmount);
+            case CALL -> handleCall(player, callAmount);
+            case RAISE -> handleRaise(player, raiseTo);
+            case ALL_IN -> handleAllIn(player);
         }
 
         if (contenders().size() == 1) {
@@ -127,55 +166,152 @@ public final class PokerTable {
         else currentTurnSeat = nextActionSeat(currentTurnSeat);
     }
 
-    private void handleRaise(PlayerState player, Integer raiseTo, int callAmount) {
+    private void handleCall(PlayerState player, int callAmount) {
+        if (callAmount <= 0) throw new IllegalArgumentException("当前无需跟注，可以过牌");
+        int payment = Math.min(callAmount, player.chips());
+        pot += player.pay(payment);
+        completeAction(player);
+        message = player.nickname() + (payment < callAmount ? " 全押跟注 " : " 跟注 ") + payment;
+    }
+
+    private void handleRaise(PlayerState player, Integer raiseTo) {
+        if (!player.raiseAllowed()) throw new IllegalArgumentException("本轮下注未重新开放，只能跟注或弃牌");
         if (raiseTo == null) throw new IllegalArgumentException("加注需要提供 raiseTo");
         int raiseSize = raiseTo - currentBet;
         int payment = raiseTo - player.streetBet();
         if (raiseSize < minRaise) throw new IllegalArgumentException("最小加注至 " + (currentBet + minRaise));
-        if (payment >= player.chips()) throw new IllegalArgumentException("MVP 暂不支持全押/边池，请降低加注额");
+        if (payment <= 0) throw new IllegalArgumentException("加注金额无效");
+        if (payment >= player.chips()) throw new IllegalArgumentException("达到全部筹码时请使用全押");
         pot += player.pay(payment);
-        currentBet = raiseTo;
-        minRaise = raiseSize;
-        players.stream().filter(p -> p.status() == PlayerStatus.ACTIVE && !p.id().equals(player.id())).forEach(p -> p.setActed(false));
-        player.setActed(true);
+        reopenBettingAfterFullRaise(player, raiseTo, raiseSize);
+        completeAction(player);
         message = player.nickname() + " 加注至 " + raiseTo;
     }
 
+    private void handleAllIn(PlayerState player) {
+        int target = player.streetBet() + player.chips();
+        if (target > currentBet && !player.raiseAllowed())
+            throw new IllegalArgumentException("本轮下注未重新开放，只能全押跟注或弃牌");
+        int previousBet = currentBet;
+        int raiseSize = target - previousBet;
+        int payment = player.chips();
+        pot += player.pay(payment);
+
+        if (target > previousBet) {
+            currentBet = target;
+            if (raiseSize >= minRaise) reopenBettingAfterFullRaise(player, target, raiseSize);
+        }
+        completeAction(player);
+        message = player.nickname() + " 全押 " + payment;
+    }
+
+    private void reopenBettingAfterFullRaise(PlayerState raiser, int raiseTo, int raiseSize) {
+        currentBet = raiseTo;
+        minRaise = raiseSize;
+        activePlayers().stream().filter(player -> !player.id().equals(raiser.id())).forEach(player -> {
+            player.setActed(false);
+            player.setRaiseAllowed(true);
+        });
+    }
+
+    private void completeAction(PlayerState player) {
+        player.setActed(true);
+        player.setRaiseAllowed(false);
+    }
+
     private boolean bettingRoundComplete() {
-        return activePlayers().stream().allMatch(p -> p.acted() && p.streetBet() == currentBet);
+        return activePlayers().stream().allMatch(player -> player.acted() && player.streetBet() == currentBet);
     }
 
     private void advanceStreet() {
         players.forEach(PlayerState::resetStreet);
         currentBet = 0;
         minRaise = bigBlind;
+        if (phase == GamePhase.RIVER) {
+            showdown();
+            return;
+        }
+        dealNextStreet();
+        if (activePlayers().size() < 2) runOutBoard();
+        else currentTurnSeat = nextActionSeat(dealerSeat);
+    }
+
+    private void dealNextStreet() {
         switch (phase) {
-            case PRE_FLOP -> { deck.deal(); communityCards.add(deck.deal()); communityCards.add(deck.deal()); communityCards.add(deck.deal()); phase = GamePhase.FLOP; message = "翻牌"; }
-            case FLOP -> { deck.deal(); communityCards.add(deck.deal()); phase = GamePhase.TURN; message = "转牌"; }
-            case TURN -> { deck.deal(); communityCards.add(deck.deal()); phase = GamePhase.RIVER; message = "河牌"; }
-            case RIVER -> { showdown(); return; }
+            case PRE_FLOP -> {
+                deck.deal();
+                communityCards.add(deck.deal());
+                communityCards.add(deck.deal());
+                communityCards.add(deck.deal());
+                phase = GamePhase.FLOP;
+                message = "翻牌";
+            }
+            case FLOP -> {
+                deck.deal();
+                communityCards.add(deck.deal());
+                phase = GamePhase.TURN;
+                message = "转牌";
+            }
+            case TURN -> {
+                deck.deal();
+                communityCards.add(deck.deal());
+                phase = GamePhase.RIVER;
+                message = "河牌";
+            }
             default -> throw new IllegalStateException("无效牌局阶段");
         }
-        currentTurnSeat = nextActiveSeat(dealerSeat);
+    }
+
+    private void runOutBoard() {
+        while (phase != GamePhase.RIVER) dealNextStreet();
+        showdown();
     }
 
     private void showdown() {
         List<PlayerState> contenders = contenders();
-        HandValue best = null;
-        List<PlayerState> winners = new ArrayList<>();
-        for (PlayerState player : contenders) {
-            List<Card> seven = new ArrayList<>(communityCards);
-            seven.addAll(player.holeCards());
-            HandValue value = HandEvaluator.bestOf(seven);
-            if (best == null || value.compareTo(best) > 0) {
-                best = value; winners.clear(); winners.add(player);
-            } else if (value.compareTo(best) == 0) winners.add(player);
+        Map<PlayerState, HandValue> values = new HashMap<>();
+        for (PlayerState player : contenders) values.put(player, evaluate(player));
+
+        List<Integer> levels = players.stream().map(PlayerState::handBet).filter(value -> value > 0)
+                .distinct().sorted().toList();
+        List<String> results = new ArrayList<>();
+        int previous = 0;
+        int potIndex = 0;
+        for (int level : levels) {
+            List<PlayerState> contributors = players.stream().filter(player -> player.handBet() >= level).toList();
+            int amount = (level - previous) * contributors.size();
+            List<PlayerState> eligible = contributors.stream().filter(this::isContender).toList();
+            if (eligible.isEmpty()) {
+                int refund = level - previous;
+                contributors.forEach(player -> player.win(refund));
+            } else {
+                HandValue best = eligible.stream().map(values::get).max(HandValue::compareTo).orElseThrow();
+                List<PlayerState> winners = eligible.stream().filter(player -> values.get(player).compareTo(best) == 0).toList();
+                awardPot(winners, amount);
+                String label = potIndex == 0 ? "主池" : "边池 " + potIndex;
+                potIndex++;
+                String names = winners.stream().map(PlayerState::nickname).reduce((a, b) -> a + "、" + b).orElse("");
+                results.add(names + " 以" + best.category().label() + "赢得" + label + " " + amount);
+            }
+            previous = level;
         }
-        int share = pot / winners.size(), remainder = pot % winners.size();
-        for (int i = 0; i < winners.size(); i++) winners.get(i).win(share + (i < remainder ? 1 : 0));
-        message = winners.stream().map(PlayerState::nickname).reduce((a, b) -> a + "、" + b).orElse("")
-                + " 以" + best.category().label() + "赢得 " + pot;
+        message = String.join("；", results);
         finishHand();
+    }
+
+    private HandValue evaluate(PlayerState player) {
+        List<Card> seven = new ArrayList<>(communityCards);
+        seven.addAll(player.holeCards());
+        return HandEvaluator.bestOf(seven);
+    }
+
+    private void awardPot(List<PlayerState> winners, int amount) {
+        List<PlayerState> ordered = winners.stream().sorted(Comparator.comparingInt(player ->
+                Math.floorMod(player.seat() - dealerSeat - 1, maxPlayers))).toList();
+        int share = amount / ordered.size();
+        int remainder = amount % ordered.size();
+        for (int index = 0; index < ordered.size(); index++)
+            ordered.get(index).win(share + (index < remainder ? 1 : 0));
     }
 
     private void awardUncontested(PlayerState winner) {
@@ -192,42 +328,54 @@ public final class PokerTable {
     }
 
     private void postBlind(PlayerState player, int blind) {
-        if (player.chips() <= blind) throw new IllegalStateException("玩家筹码不足以支付盲注");
-        pot += player.pay(blind);
+        pot += player.pay(Math.min(player.chips(), blind));
     }
 
     private int firstFreeSeat() {
-        for (int i = 0; i < maxPlayers; i++) {
-            int seat = i;
-            if (players.stream().noneMatch(p -> p.seat() == seat)) return seat;
+        for (int index = 0; index < maxPlayers; index++) {
+            int seat = index;
+            if (players.stream().noneMatch(player -> player.seat() == seat)) return seat;
         }
         throw new IllegalStateException("没有空座位");
     }
 
     private PlayerState requirePlayer(UUID playerId) {
-        return players.stream().filter(p -> p.id().equals(playerId)).findFirst()
+        return players.stream().filter(player -> player.id().equals(playerId)).findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("玩家不存在"));
     }
 
     private PlayerState playerAt(int seat) {
-        return players.stream().filter(p -> p.seat() == seat).findFirst().orElseThrow();
+        return players.stream().filter(player -> player.seat() == seat).findFirst().orElseThrow();
     }
 
     private List<PlayerState> activePlayers() {
-        return players.stream().filter(p -> p.status() == PlayerStatus.ACTIVE).toList();
+        return players.stream().filter(player -> player.status() == PlayerStatus.ACTIVE).toList();
+    }
+
+    private boolean isContender(PlayerState player) {
+        return player.status() == PlayerStatus.ACTIVE || player.status() == PlayerStatus.ALL_IN;
     }
 
     private List<PlayerState> contenders() {
-        return players.stream().filter(p -> p.status() == PlayerStatus.ACTIVE).toList();
+        return players.stream().filter(this::isContender).toList();
     }
 
     private int nextActiveSeat(int afterSeat) {
         for (int offset = 1; offset <= maxPlayers; offset++) {
             int candidate = Math.floorMod(afterSeat + offset, maxPlayers);
-            if (players.stream().anyMatch(p -> p.seat() == candidate && p.status() == PlayerStatus.ACTIVE)) return candidate;
+            if (players.stream().anyMatch(player -> player.seat() == candidate
+                    && player.status() == PlayerStatus.ACTIVE)) return candidate;
         }
         throw new IllegalStateException("没有可行动的玩家");
     }
 
-    private int nextActionSeat(int afterSeat) { return nextActiveSeat(afterSeat); }
+    private int nextActionSeat(int afterSeat) {
+        for (int offset = 1; offset <= maxPlayers; offset++) {
+            int candidate = Math.floorMod(afterSeat + offset, maxPlayers);
+            if (players.stream().anyMatch(player -> player.seat() == candidate
+                    && player.status() == PlayerStatus.ACTIVE
+                    && (!player.acted() || player.streetBet() != currentBet))) return candidate;
+        }
+        throw new IllegalStateException("没有等待行动的玩家");
+    }
 }

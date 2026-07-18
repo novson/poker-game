@@ -10,6 +10,7 @@ export function watchTable(tableId, onChange, onStatus) {
     onConnect: () => {
       onStatus?.(true)
       client.subscribe(`/topic/tables/${tableId}`, () => onChange())
+      onChange()
     },
     onWebSocketClose: () => onStatus?.(false),
     onStompError: () => onStatus?.(false)

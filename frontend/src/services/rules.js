@@ -12,7 +12,13 @@ export function minimumRaiseTo(table) {
 
 export function validRaise(table, player, raiseTo) {
   return Number.isFinite(raiseTo)
+    && player?.canRaise !== false
     && raiseTo >= minimumRaiseTo(table)
     && raiseTo - player.streetBet < player.chips
+}
+
+export function canAllIn(table, player) {
+  const allInTo = (player?.streetBet || 0) + (player?.chips || 0)
+  return (player?.chips || 0) > 0 && (allInTo <= table.currentBet || player?.canRaise !== false)
 }
 
