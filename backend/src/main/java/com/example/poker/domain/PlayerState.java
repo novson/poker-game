@@ -9,6 +9,7 @@ public final class PlayerState {
     private final UUID reconnectToken;
     private final String nickname;
     private final int seat;
+    private final boolean ai;
     private int chips;
     private int streetBet;
     private int handBet;
@@ -17,18 +18,20 @@ public final class PlayerState {
     private PlayerStatus status = PlayerStatus.SITTING;
     private final List<Card> holeCards = new ArrayList<>(2);
 
-    public PlayerState(UUID id, UUID reconnectToken, String nickname, int seat, int chips) {
+    public PlayerState(UUID id, UUID reconnectToken, String nickname, int seat, int chips, boolean ai) {
         this.id = id;
         this.reconnectToken = reconnectToken;
         this.nickname = nickname;
         this.seat = seat;
         this.chips = chips;
+        this.ai = ai;
     }
 
     public UUID id() { return id; }
     public UUID reconnectToken() { return reconnectToken; }
     public String nickname() { return nickname; }
     public int seat() { return seat; }
+    public boolean ai() { return ai; }
     public int chips() { return chips; }
     public int streetBet() { return streetBet; }
     public int handBet() { return handBet; }

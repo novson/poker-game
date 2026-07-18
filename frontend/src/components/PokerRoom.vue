@@ -61,6 +61,7 @@ function act(type) {
             </div>
             <div class="player-chip" :title="seat.player.status">
               <span v-if="seat.player.dealer" class="dealer">D</span>
+              <span v-if="seat.player.ai" class="ai-badge">AI</span>
               <strong class="player-name">{{ seat.player.nickname }}</strong>
               <small class="player-stack"><span aria-hidden="true">◉</span>{{ seat.player.chips }}</small>
             </div>

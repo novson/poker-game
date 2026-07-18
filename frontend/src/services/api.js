@@ -28,6 +28,19 @@ export const api = {
   }),
   act: (tableId, playerId, reconnectToken, type, raiseTo) => request(`/api/tables/${tableId}/actions`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, type, raiseTo })
+  }),
+  adminSettings: (token) => request('/api/admin/settings', {
+    headers: { 'X-Admin-Token': token }
+  }),
+  updateAdminSettings: (token, startingChips) => request('/api/admin/settings', {
+    method: 'PUT', headers: { ...jsonHeaders, 'X-Admin-Token': token },
+    body: JSON.stringify({ startingChips })
+  }),
+  adminTables: (token) => request('/api/admin/tables', {
+    headers: { 'X-Admin-Token': token }
+  }),
+  deleteAdminTable: (token, tableId) => request(`/api/admin/tables/${tableId}`, {
+    method: 'DELETE', headers: { 'X-Admin-Token': token }
   })
 }
 
