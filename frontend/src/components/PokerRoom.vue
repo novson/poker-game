@@ -13,6 +13,7 @@ const chipAmount = ref(100)
 const autoNext = ref(localStorage.getItem('poker.autoNext') !== 'false')
 const autoCountdown = ref(0)
 const strategyExpanded = ref(false)
+const customRaiseExpanded = ref(false)
 let autoTimer
 
 const me = computed(() => props.table.players.find(player => player.id === props.playerId))
@@ -71,6 +72,7 @@ watch([autoNextEligible, autoNext, () => props.busy], ([eligible, enabled, busy]
 }, { immediate: true })
 watch(myTurn, value => {
   if (value && navigator.vibrate) navigator.vibrate(70)
+  if (!value) customRaiseExpanded.value = false
 })
 
 function act(type) {
@@ -108,7 +110,7 @@ onBeforeUnmount(clearAutoTimer)
 </script>
 
 <template>
-  <main class="room-shell">
+  <main class="room-shell" :class="{ 'has-turn-controls': myTurn }">
     <header class="room-header">
       <button class="ghost-button" @click="emit('leave')">← 暂离牌桌</button>
       <div>
@@ -171,30 +173,7 @@ onBeforeUnmount(clearAutoTimer)
       <small v-if="table.privateTable && me.chips < table.minBuyIn" class="top-up-reminder">桌上筹码低于最低带入 {{ table.minBuyIn }}，自动下一局已暂停；补码后会自动恢复。</small>
     </section>
 
-    <section v-if="table.privateTable && !betweenHands" class="strategy-panel">
-      <header>
-        <div><p class="eyebrow">REAL-TIME STRATEGY</p><strong>近似 GTO 实时参考</strong></div>
-        <div class="strategy-head-actions"><span>{{ myTurn ? '轮到你行动' : '持续计算中' }}</span><button type="button" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '详情' }}</button></div>
-      </header>
-      <template v-if="advice?.available">
-        <div class="strategy-metrics">
-          <div><small>预估胜率</small><strong>{{ percent(advice.equity) }}</strong></div>
-          <div><small>底池赔率</small><strong>{{ percent(advice.potOdds) }}</strong></div>
-          <div><small>胜率优势</small><strong :class="{ negative: advice.edge < 0 }">{{ advice.edge >= 0 ? '+' : '' }}{{ percent(advice.edge) }}</strong></div>
-          <div class="strategy-action"><small>建议动作</small><strong>{{ advice.actionLabel }}</strong></div>
-        </div>
-        <div v-if="strategyExpanded" class="strategy-mix">
-          <div><span>弃牌 {{ advice.foldPercent }}%</span><i><b :style="{ width: `${advice.foldPercent}%` }"></b></i></div>
-          <div><span>{{ advice.passiveLabel }} {{ advice.checkCallPercent }}%</span><i><b :style="{ width: `${advice.checkCallPercent}%` }"></b></i></div>
-          <div><span>加注 {{ advice.raisePercent }}%</span><i><b :style="{ width: `${advice.raisePercent}%` }"></b></i></div>
-        </div>
-        <p>{{ advice.summary }}</p>
-        <small v-if="strategyExpanded" class="strategy-note">{{ advice.note }}</small>
-      </template>
-      <div v-else class="strategy-loading">正在根据手牌、公共牌和对手数量模拟胜率…</div>
-    </section>
-
-    <section class="control-panel">
+    <section class="control-panel" :class="{ 'turn-controls': myTurn }">
       <div class="status-copy">
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · 跟注额 {{ callAmount }}</small>
@@ -208,9 +187,12 @@ onBeforeUnmount(clearAutoTimer)
         <div v-if="quickRaises.length" class="quick-raises">
           <button v-for="option in quickRaises" :key="option.amount" :class="{ recommended: option.label === '建议' }" :disabled="busy" @click="quickRaise(option.amount)">{{ option.label }} <strong>{{ option.amount }}</strong></button>
         </div>
-        <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
-        <button class="gold" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !canRaise" @click="act('RAISE')">自定义加注</button>
+        <button class="custom-raise-toggle" type="button" :class="{ active: customRaiseExpanded }" @click="customRaiseExpanded = !customRaiseExpanded">{{ customRaiseExpanded ? '收起自定义' : '自定义加注' }}</button>
         <button v-if="callAmount < me.chips" class="all-in-button" :class="{ recommended: advice?.recommendedAction === 'ALL_IN' }" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
+        <template v-if="customRaiseExpanded">
+          <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
+          <button class="gold custom-raise-confirm" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !canRaise" @click="act('RAISE')">确认加注</button>
+        </template>
       </div>
       <div v-else-if="canStart" class="next-hand-controls">
         <button class="gold start-button" :disabled="busy" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
@@ -219,5 +201,28 @@ onBeforeUnmount(clearAutoTimer)
       </div>
     </section>
     <p class="mvp-note">规则：2–6 人、盲注 {{ table.smallBlind }}/{{ table.bigBlind }}、带入 {{ table.minBuyIn }}–{{ table.maxBuyIn }}；支持补码、回收、全押、边池与断线身份恢复。</p>
+
+    <section v-if="table.privateTable && !betweenHands" class="strategy-panel" :class="{ expanded: strategyExpanded }">
+      <header>
+        <div><p class="eyebrow">OPTIONAL STRATEGY</p><strong>胜率与近似 GTO 参考</strong></div>
+        <div class="strategy-head-actions"><span>需要时再查看</span><button type="button" :aria-expanded="strategyExpanded" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '展开查看' }}</button></div>
+      </header>
+      <template v-if="strategyExpanded && advice?.available">
+        <div class="strategy-metrics">
+          <div><small>预估胜率</small><strong>{{ percent(advice.equity) }}</strong></div>
+          <div><small>底池赔率</small><strong>{{ percent(advice.potOdds) }}</strong></div>
+          <div><small>胜率优势</small><strong :class="{ negative: advice.edge < 0 }">{{ advice.edge >= 0 ? '+' : '' }}{{ percent(advice.edge) }}</strong></div>
+          <div class="strategy-action"><small>建议动作</small><strong>{{ advice.actionLabel }}</strong></div>
+        </div>
+        <div class="strategy-mix">
+          <div><span>弃牌 {{ advice.foldPercent }}%</span><i><b :style="{ width: `${advice.foldPercent}%` }"></b></i></div>
+          <div><span>{{ advice.passiveLabel }} {{ advice.checkCallPercent }}%</span><i><b :style="{ width: `${advice.checkCallPercent}%` }"></b></i></div>
+          <div><span>加注 {{ advice.raisePercent }}%</span><i><b :style="{ width: `${advice.raisePercent}%` }"></b></i></div>
+        </div>
+        <p>{{ advice.summary }}</p>
+        <small class="strategy-note">{{ advice.note }}</small>
+      </template>
+      <div v-else-if="strategyExpanded" class="strategy-loading">正在根据手牌、公共牌和对手数量模拟胜率…</div>
+    </section>
   </main>
 </template>
