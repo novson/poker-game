@@ -18,7 +18,8 @@ public final class Requests {
             @Min(2) @Max(6) Integer maxPlayers) {}
 
     public record JoinTable(@NotBlank @Size(max = 16) String nickname) {}
-    public record PlayerCommand(@NotNull UUID playerId) {}
-    public record PlayerAction(@NotNull UUID playerId, @NotNull ActionType type, Integer raiseTo) {}
+    public record PlayerCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken) {}
+    public record PlayerAction(@NotNull UUID playerId, @NotNull UUID reconnectToken,
+                               @NotNull ActionType type, Integer raiseTo) {}
 }
 

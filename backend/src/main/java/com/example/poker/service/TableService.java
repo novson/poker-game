@@ -38,32 +38,47 @@ public class TableService {
         tables.put(table.id(), table);
         versions.put(table.id(), new AtomicLong());
         publish(table.id());
-        return new TableViews.SessionView(player.id(), TableViews.TableView.from(table, player.id()));
+        return session(table, player);
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname) {
         PokerTable table = requireTable(tableId);
         PlayerState player = table.join(nickname.trim());
         publish(tableId);
-        return new TableViews.SessionView(player.id(), TableViews.TableView.from(table, player.id()));
+        return session(table, player);
     }
 
-    public TableViews.TableView get(UUID tableId, UUID viewerId) {
-        return TableViews.TableView.from(requireTable(tableId), viewerId);
-    }
-
-    public TableViews.TableView start(UUID tableId, UUID playerId) {
+    public TableViews.SessionView reconnect(UUID tableId, UUID playerId, UUID reconnectToken) {
         PokerTable table = requireTable(tableId);
+        return session(table, table.authenticate(playerId, reconnectToken));
+    }
+
+    public TableViews.TableView get(UUID tableId, UUID playerId, UUID reconnectToken) {
+        PokerTable table = requireTable(tableId);
+        table.authenticate(playerId, reconnectToken);
+        return TableViews.TableView.from(table, playerId);
+    }
+
+    public TableViews.TableView start(UUID tableId, UUID playerId, UUID reconnectToken) {
+        PokerTable table = requireTable(tableId);
+        table.authenticate(playerId, reconnectToken);
         table.start(playerId);
         publish(tableId);
         return TableViews.TableView.from(table, playerId);
     }
 
-    public TableViews.TableView act(UUID tableId, UUID playerId, ActionType type, Integer raiseTo) {
+    public TableViews.TableView act(UUID tableId, UUID playerId, UUID reconnectToken,
+                                    ActionType type, Integer raiseTo) {
         PokerTable table = requireTable(tableId);
+        table.authenticate(playerId, reconnectToken);
         table.act(playerId, type, raiseTo);
         publish(tableId);
         return TableViews.TableView.from(table, playerId);
+    }
+
+    private TableViews.SessionView session(PokerTable table, PlayerState player) {
+        return new TableViews.SessionView(player.id(), player.reconnectToken(),
+                TableViews.TableView.from(table, player.id()));
     }
 
     private PokerTable requireTable(UUID tableId) {

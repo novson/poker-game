@@ -4,7 +4,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: radial-gradient(circle at 20% 0%, #123d32 0, #071c18 34%, #04110f 75%); }
 button, input, select { font: inherit; }
-button { cursor: pointer; }
+button { cursor: pointer; touch-action: manipulation; }
 button:disabled { opacity: .42; cursor: not-allowed; }
 .lobby-shell, .room-shell { min-height: 100vh; }
 .brand { height: 84px; max-width: 1240px; margin: auto; padding: 0 28px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #ffffff12; letter-spacing: .16em; }
@@ -27,6 +27,11 @@ input:focus, select:focus { border-color: #cba656; }
 .section-title { display: flex; justify-content: space-between; align-items: end; margin-bottom: 28px; }
 .section-title h2 { font-size: 34px; margin: 3px 0; }
 .ghost-button { border: 1px solid #ffffff28; color: #cfdbd7; background: transparent; padding: 10px 17px; }
+.resume-table { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 20px; padding: 20px 22px; border: 1px solid #d7b46160; background: linear-gradient(100deg, #cba45418, #ffffff08); }
+.resume-table div { display: grid; gap: 4px; }
+.resume-table p { margin: 0; }
+.resume-table strong { font-family: Georgia, serif; font-size: 22px; }
+.resume-table small { color: #789087; }
 .table-list { border-top: 1px solid #ffffff20; }
 .table-row { min-height: 76px; display: grid; grid-template-columns: 1fr 120px 130px; align-items: center; gap: 20px; border-bottom: 1px solid #ffffff16; }
 .table-row > div { display: flex; align-items: center; gap: 12px; }
@@ -63,21 +68,26 @@ input:focus, select:focus { border-color: #cba656; }
 .playing-card.small .suit { font-size: 18px; right: 3px; bottom: 1px; }
 .pot { padding: 7px 16px; border-radius: 18px; background: #062b23bb; color: #b9cbc4; font-size: 12px; border: 1px solid #ffffff18; }
 .pot strong { color: #e6bd68; font-size: 16px; margin-left: 5px; }
-.seat { position: absolute; z-index: 4; width: 132px; min-height: 68px; display: grid; justify-items: center; }
+.side-pots { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; max-width: 320px; }
+.side-pots span { padding: 4px 9px; border-radius: 12px; color: #d8c28e; background: #061f1acc; border: 1px solid #d5ad5a33; font-size: 10px; }
+.seat { position: absolute; z-index: 4; width: 132px; min-height: 68px; display: grid; justify-items: center; align-content: start; gap: 4px; }
 .seat-0 { left: 50%; bottom: -62px; transform: translateX(-50%); }
 .seat-1 { left: -86px; bottom: 12%; }
 .seat-2 { left: -65px; top: 7%; }
 .seat-3 { left: 50%; top: -67px; transform: translateX(-50%); }
 .seat-4 { right: -65px; top: 7%; }
 .seat-5 { right: -86px; bottom: 12%; }
-.player-chip { position: relative; width: 126px; padding: 9px 8px; display: grid; text-align: center; background: #0b1d1a; border: 1px solid #ffffff25; box-shadow: 0 7px 20px #0008; }
-.player-chip strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.player-chip small { color: #e2bd6f; }
+.player-chip { position: relative; width: 126px; padding: 8px; display: grid; gap: 2px; text-align: center; background: #0b1d1a; border: 1px solid #ffffff25; box-shadow: 0 7px 20px #0008; }
+.player-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 1.25; }
+.player-stack { display: flex; justify-content: center; align-items: center; gap: 4px; color: #e2bd6f; font-size: 12px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.player-stack span { color: #c89e4f; font-size: 9px; }
 .seat.active .player-chip { border-color: #f3cd74; box-shadow: 0 0 0 3px #dbb25e2b, 0 7px 20px #0008; }
+.seat.all-in .player-chip { border-color: #d06e54; }
+.seat.all-in .player-chip::before { content: 'ALL IN'; position: absolute; left: 50%; bottom: -17px; transform: translateX(-50%); color: #ff9d85; font: 800 9px sans-serif; letter-spacing: .08em; }
 .seat.mine .player-chip::after { content: '你'; position: absolute; right: -8px; top: -9px; padding: 2px 5px; color: #092019; background: #64c7a0; font-size: 9px; }
 .dealer { position: absolute; left: -12px; top: -10px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: #121b18; background: #eee7d6; border: 2px solid #d6b567; font: 800 11px sans-serif; }
-.hole-cards { height: 36px; transform: translateY(7px); }
-.hole-cards .playing-card:nth-child(2) { transform: rotate(6deg) translate(-5px, 1px); }
+.hole-cards { position: relative; z-index: 2; min-height: 54px; align-items: flex-end; margin-bottom: 2px; }
+.hole-cards .playing-card:nth-child(2) { transform: rotate(5deg) translateX(-4px); transform-origin: bottom center; }
 .bet-chip { position: absolute; color: #f3cd75; font-size: 11px; transform: translateY(-28px); }
 .empty-label { margin-top: 25px; padding: 5px 14px; border: 1px dashed #ffffff25; border-radius: 20px; color: #ffffff38; font-size: 11px; }
 .control-panel { max-width: 1120px; min-height: 90px; margin: 0 auto; padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; gap: 30px; background: #0a231e; border: 1px solid #ffffff16; }
@@ -87,6 +97,7 @@ input:focus, select:focus { border-color: #cba656; }
 .actions button, .start-button { min-width: 82px; padding: 11px 16px; border: 1px solid #ffffff28; color: white; background: #17362f; }
 .actions .danger { color: #ffaaa0; border-color: #8c493f; }
 .actions .gold, .start-button.gold { color: #12211c; background: #cba454; border-color: #e0bd70; }
+.actions .all-in-button { color: #fff0e7; background: #8d3f31; border-color: #d67661; }
 .raise-input { margin: 0 0 0 8px; display: flex; align-items: center; gap: 7px; white-space: nowrap; }
 .raise-input input { width: 88px; padding: 9px; }
 .mvp-note { margin: 16px auto 0; padding-bottom: 20px; color: #58736a; text-align: center; font-size: 11px; }
@@ -94,6 +105,7 @@ input:focus, select:focus { border-color: #cba656; }
 @media (max-width: 800px) {
   .hero { grid-template-columns: 1fr; padding-top: 55px; gap: 35px; }
   .hero h1 { font-size: 64px; }
+  .resume-table { align-items: stretch; flex-direction: column; }
   .table-row { grid-template-columns: 1fr auto; padding: 15px 0; }
   .table-row button { grid-column: 1 / -1; }
   .room-header { grid-template-columns: auto 1fr; }
@@ -102,4 +114,74 @@ input:focus, select:focus { border-color: #cba656; }
   .table-stage { overflow-x: auto; justify-content: center; min-height: 530px; }
   .control-panel { margin: 0 12px; flex-direction: column; align-items: stretch; }
   .actions { flex-wrap: wrap; }
+}
+
+@media (max-width: 600px) {
+  body { min-width: 0; }
+  input, select { font-size: 16px; }
+  .brand { height: 64px; padding: 0 16px; gap: 10px; }
+  .brand-mark { width: 30px; height: 30px; font-size: 18px; }
+  .brand small { display: none; }
+  .hero { padding: 34px 16px 42px; gap: 24px; }
+  .hero h1 { margin: 10px 0 20px; font-size: clamp(44px, 15vw, 62px); }
+  .hero-copy > p:last-child { line-height: 1.65; }
+  .create-card { padding: 24px 18px; }
+  .tables-section { padding: 38px 16px 70px; }
+  .section-title h2 { font-size: 28px; }
+  .table-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+  .table-row > div { min-width: 0; flex-wrap: wrap; gap: 7px; }
+  .table-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toast { left: 12px; right: 12px; bottom: 12px; max-width: none; }
+
+  .room-shell { min-width: 0; overflow-x: hidden; }
+  .room-header { min-height: 68px; padding: 9px 12px; grid-template-columns: auto minmax(0, 1fr); gap: 10px; }
+  .room-header .ghost-button { padding: 8px 10px; font-size: 12px; white-space: nowrap; }
+  .room-header h1 { overflow: hidden; margin: 1px 0 0; font-size: 20px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .room-header p { font-size: 10px; line-height: 1.3; }
+
+  .table-stage { min-height: 560px; padding: 62px 0 72px; overflow: hidden; }
+  .poker-table { width: min(70vw, 330px); min-width: 0; aspect-ratio: .72; border-width: 9px; }
+  .poker-table::after { inset: 5px; }
+  .felt-copy { font-size: 17px; letter-spacing: .2em; }
+  .board { gap: 10px; }
+  .community-cards { gap: 3px; }
+  .playing-card, .empty-card { width: clamp(34px, 10vw, 43px); border-radius: 5px; }
+  .playing-card { padding: 4px; }
+  .playing-card .rank { font-size: clamp(14px, 4.4vw, 18px); letter-spacing: -.05em; }
+  .playing-card .suit { right: 4px; bottom: 2px; font-size: clamp(18px, 6vw, 24px); }
+  .playing-card.small { width: 32px; padding: 3px; }
+  .playing-card.small .rank { font-size: 12px; }
+  .playing-card.small .suit { right: 2px; bottom: 1px; font-size: 15px; }
+  .seat.mine .playing-card.small { width: 36px; }
+  .seat.mine .playing-card.small .rank { font-size: 13px; }
+  .seat.mine .playing-card.small .suit { font-size: 17px; }
+  .pot { padding: 5px 11px; }
+  .pot strong { font-size: 14px; }
+  .side-pots { max-width: 210px; gap: 3px; }
+  .side-pots span { padding: 3px 6px; }
+
+  .seat { width: 98px; min-height: 88px; gap: 3px; }
+  .seat-0 { bottom: -58px; }
+  .seat-1 { left: -45px; bottom: 13%; }
+  .seat-2 { left: -45px; top: 13%; }
+  .seat-3 { top: -59px; }
+  .seat-4 { right: -45px; top: 13%; }
+  .seat-5 { right: -45px; bottom: 13%; }
+  .player-chip { width: 96px; padding: 7px 6px; gap: 2px; }
+  .player-name { font-size: 12px; }
+  .player-stack { gap: 3px; font-size: 11px; }
+  .hole-cards { min-height: 47px; margin-bottom: 2px; }
+  .seat.mine .hole-cards { min-height: 52px; }
+  .empty-label { margin-top: 20px; padding: 4px 9px; }
+  .dealer { left: -7px; width: 20px; height: 20px; font-size: 9px; }
+  .bet-chip { font-size: 10px; transform: translateY(-22px); }
+
+  .control-panel { position: sticky; z-index: 20; bottom: 0; min-height: 0; margin: 0; padding: 11px 12px calc(11px + env(safe-area-inset-bottom)); gap: 10px; border-width: 1px 0 0; box-shadow: 0 -12px 35px #020b09e8; }
+  .status-copy p { font-size: 14px; line-height: 1.4; }
+  .status-copy small { font-size: 12px; line-height: 1.35; }
+  .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+  .actions button, .start-button { min-width: 0; min-height: 42px; padding: 10px 5px; font-size: 13px; }
+  .raise-input { grid-column: span 2; margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+  .raise-input input { width: 100%; min-width: 0; padding: 8px; }
+  .mvp-note { display: none; }
 }

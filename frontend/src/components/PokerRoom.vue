@@ -1,7 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
-import { callAmount as getCallAmount, canStart as getCanStart, minimumRaiseTo, validRaise } from '../services/rules'
+import { callAmount as getCallAmount, canAllIn, canStart as getCanStart, minimumRaiseTo, validRaise } from '../services/rules'
+import { seatsFromViewer } from '../services/tableView'
 
 const props = defineProps({ table: Object, playerId: String, busy: Boolean, connected: Boolean })
 const emit = defineEmits(['action', 'start', 'leave'])
@@ -13,8 +14,8 @@ const callAmount = computed(() => getCallAmount(props.table, me.value))
 const canStart = computed(() => getCanStart(props.table))
 const minRaiseTo = computed(() => minimumRaiseTo(props.table))
 const canRaise = computed(() => validRaise(props.table, me.value, Number(raiseTo.value)))
-const seats = computed(() => Array.from({ length: props.table.maxPlayers }, (_, seat) =>
-  props.table.players.find(player => player.seat === seat) || null))
+const allInAllowed = computed(() => canAllIn(props.table, me.value))
+const seats = computed(() => seatsFromViewer(props.table.players, props.table.maxPlayers, props.playerId))
 
 watch(minRaiseTo, value => { raiseTo.value = value }, { immediate: true })
 
@@ -26,7 +27,7 @@ function act(type) {
 <template>
   <main class="room-shell">
     <header class="room-header">
-      <button class="ghost-button" @click="emit('leave')">← 返回大厅</button>
+      <button class="ghost-button" @click="emit('leave')">← 暂离牌桌</button>
       <div>
         <p class="eyebrow">{{ table.phaseLabel }} · 第 {{ table.handNumber || 0 }} 局</p>
         <h1>{{ table.name }}</h1>
@@ -48,19 +49,22 @@ function act(type) {
             <div v-for="index in 5 - table.communityCards.length" :key="`slot-${index}`" class="empty-card"></div>
           </div>
           <div class="pot">底池 <strong>{{ table.pot }}</strong></div>
+          <div v-if="table.pots?.length > 1" class="side-pots">
+            <span v-for="(amount, index) in table.pots" :key="index">{{ index ? `边池 ${index}` : '主池' }} {{ amount }}</span>
+          </div>
         </div>
 
-        <div v-for="(player, seat) in seats" :key="seat" class="seat" :class="[`seat-${seat}`, { empty: !player, active: player?.currentTurn, mine: player?.id === playerId }]">
-          <template v-if="player">
+        <div v-for="seat in seats" :key="seat.actualSeat" class="seat" :class="[`seat-${seat.position}`, { empty: !seat.player, active: seat.player?.currentTurn, mine: seat.player?.id === playerId, 'all-in': seat.player?.status === 'ALL_IN' }]">
+          <template v-if="seat.player">
             <div class="hole-cards">
-              <PlayingCard v-for="(card, index) in player.cards" :key="index" :value="card" small />
+              <PlayingCard v-for="(card, index) in seat.player.cards" :key="index" :value="card" small />
             </div>
-            <div class="player-chip" :title="player.status">
-              <span v-if="player.dealer" class="dealer">D</span>
-              <strong>{{ player.nickname }}</strong>
-              <small>◉ {{ player.chips }}</small>
+            <div class="player-chip" :title="seat.player.status">
+              <span v-if="seat.player.dealer" class="dealer">D</span>
+              <strong class="player-name">{{ seat.player.nickname }}</strong>
+              <small class="player-stack"><span aria-hidden="true">◉</span>{{ seat.player.chips }}</small>
             </div>
-            <span v-if="player.streetBet" class="bet-chip">{{ player.streetBet }}</span>
+            <span v-if="seat.player.streetBet" class="bet-chip">{{ seat.player.streetBet }}</span>
           </template>
           <span v-else class="empty-label">空位</span>
         </div>
@@ -77,12 +81,13 @@ function act(type) {
       <div v-if="myTurn" class="actions">
         <button class="danger" :disabled="busy" @click="act('FOLD')">弃牌</button>
         <button v-if="callAmount === 0" :disabled="busy" @click="act('CHECK')">过牌</button>
-        <button v-else :disabled="busy || callAmount >= me.chips" @click="act('CALL')">跟注 {{ callAmount }}</button>
+        <button v-else :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
         <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
         <button class="gold" :disabled="busy || !canRaise" @click="act('RAISE')">加注</button>
+        <button v-if="callAmount < me.chips" class="all-in-button" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
       </div>
       <button v-else-if="canStart" class="gold start-button" :disabled="busy" @click="emit('start')">开始一局</button>
     </section>
-    <p class="mvp-note">MVP 规则：2–6 人、起始 2,000 筹码；暂不支持全押、边池和中途重连身份恢复。</p>
+    <p class="mvp-note">规则：2–6 人、起始 2,000 筹码；支持全押、边池与断线身份恢复。</p>
   </main>
 </template>

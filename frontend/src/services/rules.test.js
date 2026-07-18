@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { callAmount, canStart, minimumRaiseTo, validRaise } from './rules'
+import { callAmount, canAllIn, canStart, minimumRaiseTo, validRaise } from './rules'
 
 describe('poker action rules', () => {
   const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{}, {}] }
@@ -14,6 +14,12 @@ describe('poker action rules', () => {
     expect(validRaise(table, player, 59)).toBe(false)
     expect(validRaise(table, player, 60)).toBe(true)
     expect(validRaise(table, player, 520)).toBe(false)
+    expect(validRaise(table, { ...player, canRaise: false }, 60)).toBe(false)
+  })
+
+  it('allows a locked player to go all-in only as a call', () => {
+    expect(canAllIn(table, { streetBet: 20, chips: 20, canRaise: false })).toBe(true)
+    expect(canAllIn(table, { streetBet: 20, chips: 30, canRaise: false })).toBe(false)
   })
 
   it('starts only from a completed phase with two players', () => {
