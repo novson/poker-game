@@ -7,6 +7,7 @@ import { watchTable } from './services/socket'
 
 const tables = ref([])
 const table = ref(null)
+const advice = ref(null)
 const playerId = ref('')
 const reconnectToken = ref('')
 const nickname = ref(localStorage.getItem('poker.nickname') || '')
@@ -42,6 +43,7 @@ const settingsRatios = computed(() => {
   }
 })
 let stopSocket
+let adviceRequest = 0
 
 watch(maxPlayers, value => { aiPlayers.value = Math.min(aiPlayers.value, value - 1) })
 
@@ -83,6 +85,7 @@ function remember(session) {
     autoResume: true
   })
   connect()
+  loadAdvice()
 }
 
 async function resumeSession(silent = false) {
@@ -110,6 +113,7 @@ async function resumeSession(silent = false) {
   savedSession.value = savePokerSession({ ...session, reconnectToken: restored.reconnectToken,
     tableName: restored.table.name, autoResume: true })
   connect()
+  loadAdvice()
 }
 
 async function createTable() {
@@ -135,7 +139,25 @@ async function join(item) {
 async function refresh() {
   if (!table.value || !playerId.value) return
   const latest = await run(() => api.getTable(table.value.id, playerId.value, reconnectToken.value))
-  if (latest) table.value = latest
+  if (latest) {
+    table.value = latest
+    loadAdvice()
+  }
+}
+
+async function loadAdvice() {
+  const requestId = ++adviceRequest
+  if (!table.value?.privateTable || !playerId.value
+      || ['WAITING', 'SHOWDOWN'].includes(table.value.phase)) {
+    advice.value = null
+    return
+  }
+  try {
+    const latest = await api.advice(table.value.id, playerId.value, reconnectToken.value)
+    if (requestId === adviceRequest) advice.value = latest
+  } catch (_) {
+    if (requestId === adviceRequest) advice.value = null
+  }
 }
 
 function connect() {
@@ -145,13 +167,19 @@ function connect() {
 
 async function start() {
   const latest = await run(() => api.start(table.value.id, playerId.value, reconnectToken.value))
-  if (latest) table.value = latest
+  if (latest) {
+    table.value = latest
+    loadAdvice()
+  }
 }
 
 async function action(payload) {
   const latest = await run(() => api.act(table.value.id, playerId.value, reconnectToken.value,
     payload.type, payload.raiseTo))
-  if (latest) table.value = latest
+  if (latest) {
+    table.value = latest
+    loadAdvice()
+  }
 }
 
 function leave() {
@@ -161,7 +189,7 @@ function leave() {
   if (savedSession.value) {
     savedSession.value = savePokerSession({ ...savedSession.value, autoResume: false })
   }
-  table.value = null; playerId.value = ''; reconnectToken.value = ''; loadTables()
+  table.value = null; advice.value = null; playerId.value = ''; reconnectToken.value = ''; loadTables()
 }
 
 async function adjustChips(type, amount) {
@@ -243,7 +271,7 @@ onBeforeUnmount(() => stopSocket?.())
 </script>
 
 <template>
-  <PokerRoom v-if="table" :table="table" :player-id="playerId" :busy="busy" :connected="connected" @action="action" @chips="adjustChips" @start="start" @leave="leave" />
+  <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice" :busy="busy" :connected="connected" @action="action" @chips="adjustChips" @start="start" @leave="leave" />
   <main v-else class="lobby-shell">
     <nav class="brand">
       <span class="brand-mark">R</span><strong>RIVER ROOM</strong>

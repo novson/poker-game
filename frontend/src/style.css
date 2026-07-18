@@ -141,6 +141,26 @@ input:focus, select:focus { border-color: #cba656; }
 .bankroll-actions button { padding: 9px 13px; color: #d8e4df; background: #17362f; border: 1px solid #ffffff25; }
 .bankroll-actions .cash-all { color: #e1bd70; border-color: #cba45455; }
 .bankroll-bar > small { grid-column: 1 / -1; color: #5f7b71; font-size: 11px; }
+.strategy-panel { max-width: 1120px; margin: 0 auto 10px; padding: 15px 18px; color: #a9bbb5; background: linear-gradient(115deg, #0b2721, #071915); border: 1px solid #cba45435; box-shadow: 0 12px 35px #0004; }
+.strategy-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+.strategy-panel > header div { display: grid; gap: 2px; }
+.strategy-panel > header .eyebrow { margin: 0; font-size: 9px; }
+.strategy-panel > header strong { color: #e4ddd0; font-size: 15px; }
+.strategy-panel > header > span { padding: 4px 8px; color: #d9bd7b; background: #cba45412; border: 1px solid #cba45438; font-size: 10px; }
+.strategy-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(150px, 1.25fr); gap: 8px; }
+.strategy-metrics > div { padding: 10px 11px; display: grid; gap: 3px; background: #061713; border: 1px solid #ffffff10; }
+.strategy-metrics small { color: #668078; font-size: 10px; }
+.strategy-metrics strong { color: #70d1aa; font-size: 18px; font-variant-numeric: tabular-nums; }
+.strategy-metrics strong.negative { color: #dc8777; }
+.strategy-metrics .strategy-action { border-color: #cba45442; background: #cba4540d; }
+.strategy-metrics .strategy-action strong { color: #ebc979; }
+.strategy-mix { margin-top: 11px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.strategy-mix > div { display: grid; gap: 5px; color: #829a91; font-size: 10px; }
+.strategy-mix i { height: 4px; overflow: hidden; background: #ffffff0d; }
+.strategy-mix b { display: block; height: 100%; background: linear-gradient(90deg, #8b6b3f, #d5ae5d); }
+.strategy-panel > p { margin: 11px 0 3px; color: #b6c6c0; font-size: 12px; line-height: 1.5; }
+.strategy-note { color: #526d64; font-size: 10px; line-height: 1.45; }
+.strategy-loading { padding: 18px; color: #718b82; text-align: center; border: 1px dashed #ffffff16; font-size: 12px; }
 .control-panel { max-width: 1120px; min-height: 90px; margin: 0 auto; padding: 18px 24px; display: flex; align-items: center; justify-content: space-between; gap: 30px; background: #0a231e; border: 1px solid #ffffff16; }
 .status-copy p { margin: 0 0 4px; font-weight: 600; }
 .status-copy small { color: #809b91; }
@@ -165,6 +185,7 @@ input:focus, select:focus { border-color: #cba656; }
   .table-stage { overflow-x: auto; justify-content: center; min-height: 530px; }
   .control-panel { margin: 0 12px; flex-direction: column; align-items: stretch; }
   .bankroll-bar { margin: 0 12px 10px; grid-template-columns: 1fr; }
+  .strategy-panel { margin: 0 12px 10px; }
   .bankroll-actions { justify-self: stretch; flex-wrap: wrap; }
   .actions { flex-wrap: wrap; }
 }
@@ -240,6 +261,12 @@ input:focus, select:focus { border-color: #cba656; }
 
   .control-panel { position: sticky; z-index: 20; bottom: 0; min-height: 0; margin: 0; padding: 11px 12px calc(11px + env(safe-area-inset-bottom)); gap: 10px; border-width: 1px 0 0; box-shadow: 0 -12px 35px #020b09e8; }
   .bankroll-bar { margin: 0; padding: 10px 12px; border-width: 1px 0 0; }
+  .strategy-panel { margin: 0; padding: 11px 12px; border-width: 1px 0 0; }
+  .strategy-panel > header { margin-bottom: 9px; }
+  .strategy-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .strategy-metrics > div { padding: 8px 9px; }
+  .strategy-metrics strong { font-size: 16px; }
+  .strategy-mix { gap: 6px; }
   .bankroll-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
   .bankroll-actions label { grid-column: 1 / -1; display: grid; grid-template-columns: auto minmax(0, 1fr); }
   .bankroll-actions input { width: 100%; min-width: 0; }

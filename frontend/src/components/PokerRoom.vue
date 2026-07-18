@@ -5,7 +5,7 @@ import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canStart as getCanStart, minimumRaiseTo, validRaise } from '../services/rules'
 import { seatsFromViewer } from '../services/tableView'
 
-const props = defineProps({ table: Object, playerId: String, busy: Boolean, connected: Boolean })
+const props = defineProps({ table: Object, playerId: String, advice: Object, busy: Boolean, connected: Boolean })
 const emit = defineEmits(['action', 'chips', 'start', 'leave'])
 const raiseTo = ref(40)
 const chipAmount = ref(100)
@@ -45,6 +45,10 @@ function act(type) {
 
 function transfer(type, amount = transferAmount.value) {
   emit('chips', type, Number(amount))
+}
+
+function percent(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`
 }
 </script>
 
@@ -109,6 +113,29 @@ function transfer(type, amount = transferAmount.value) {
         <button class="cash-all" :disabled="busy || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
       </div>
       <small>只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
+    </section>
+
+    <section v-if="table.privateTable && !betweenHands" class="strategy-panel">
+      <header>
+        <div><p class="eyebrow">REAL-TIME STRATEGY</p><strong>近似 GTO 实时参考</strong></div>
+        <span>{{ myTurn ? '轮到你行动' : '持续计算中' }}</span>
+      </header>
+      <template v-if="advice?.available">
+        <div class="strategy-metrics">
+          <div><small>预估胜率</small><strong>{{ percent(advice.equity) }}</strong></div>
+          <div><small>底池赔率</small><strong>{{ percent(advice.potOdds) }}</strong></div>
+          <div><small>胜率优势</small><strong :class="{ negative: advice.edge < 0 }">{{ advice.edge >= 0 ? '+' : '' }}{{ percent(advice.edge) }}</strong></div>
+          <div class="strategy-action"><small>建议动作</small><strong>{{ advice.actionLabel }}</strong></div>
+        </div>
+        <div class="strategy-mix">
+          <div><span>弃牌 {{ advice.foldPercent }}%</span><i><b :style="{ width: `${advice.foldPercent}%` }"></b></i></div>
+          <div><span>{{ advice.passiveLabel }} {{ advice.checkCallPercent }}%</span><i><b :style="{ width: `${advice.checkCallPercent}%` }"></b></i></div>
+          <div><span>加注 {{ advice.raisePercent }}%</span><i><b :style="{ width: `${advice.raisePercent}%` }"></b></i></div>
+        </div>
+        <p>{{ advice.summary }}</p>
+        <small class="strategy-note">{{ advice.note }}</small>
+      </template>
+      <div v-else class="strategy-loading">正在根据手牌、公共牌和对手数量模拟胜率…</div>
     </section>
 
     <section class="control-panel">

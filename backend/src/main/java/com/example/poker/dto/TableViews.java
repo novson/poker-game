@@ -61,6 +61,10 @@ public final class TableViews {
     public record SessionView(UUID playerId, UUID reconnectToken, TableView table) {}
     public record AdminSettings(int totalChips, int minBuyIn, int defaultBuyIn, int maxBuyIn,
                                 int smallBlind, int bigBlind) {}
+    public record StrategyAdvice(boolean available, double equity, double potOdds, double edge,
+                                 String recommendedAction, String actionLabel, Integer raiseTo,
+                                 int foldPercent, int checkCallPercent, int raisePercent,
+                                 String passiveLabel, String summary, String note) {}
     public record TableEvent(UUID tableId, long version) {}
     public record ErrorView(String message, Instant timestamp) {}
 }

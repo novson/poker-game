@@ -44,6 +44,12 @@ public class TableController {
         return service.get(tableId, playerId, reconnectToken);
     }
 
+    @GetMapping("/{tableId}/advice")
+    public TableViews.StrategyAdvice advice(@PathVariable UUID tableId, @RequestParam UUID playerId,
+                                            @RequestParam UUID reconnectToken) {
+        return service.advice(tableId, playerId, reconnectToken);
+    }
+
     @PostMapping("/{tableId}/reconnect")
     public TableViews.SessionView reconnect(@PathVariable UUID tableId,
                                              @Valid @RequestBody Requests.PlayerCommand request) {

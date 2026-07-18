@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.security.SecureRandom;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -27,6 +28,7 @@ public class TableService {
     private final SimpMessagingTemplate messaging;
     private final PokerSettings settings;
     private final PokerAiStrategy aiStrategy = new PokerAiStrategy(new SecureRandom(), 260);
+    private final PokerAdvisor advisor = new PokerAdvisor();
 
     @Autowired
     public TableService(SimpMessagingTemplate messaging, PokerSettings settings) {
@@ -97,6 +99,35 @@ public class TableService {
         PokerTable table = requireTable(tableId);
         table.authenticate(playerId, reconnectToken);
         return TableViews.TableView.from(table, playerId);
+    }
+
+    public TableViews.StrategyAdvice advice(UUID tableId, UUID playerId, UUID reconnectToken) {
+        PokerTable table = requireTable(tableId);
+        PlayerState player = table.authenticate(playerId, reconnectToken);
+        if (!table.privateTable()) throw new IllegalArgumentException("策略指引仅支持私人 AI 牌桌");
+        if (player.ai()) throw new IllegalArgumentException("AI 玩家不需要策略指引");
+        if (table.phase() == GamePhase.WAITING || table.phase() == GamePhase.SHOWDOWN
+                || player.holeCards().size() != 2) {
+            return unavailableAdvice();
+        }
+
+        int opponents = (int) table.players().stream()
+                .filter(other -> !other.id().equals(player.id()))
+                .filter(other -> other.status() == PlayerStatus.ACTIVE
+                        || other.status() == PlayerStatus.ALL_IN)
+                .count();
+        long seed = Objects.hash(table.id(), table.handNumber(), player.holeCards(), table.communityCards(),
+                table.pot(), table.currentBet(), player.streetBet(), opponents);
+        int callAmount = table.callAmount(player.id());
+        PokerAdvisor.Result result = advisor.advise(new PokerAdvisor.Context(
+                player.holeCards(), table.communityCards(), opponents, table.pot(), callAmount,
+                table.currentBet(), table.minRaise(), table.bigBlind(), player.chips(),
+                player.streetBet(), table.canRaise(player.id()), seed));
+        return new TableViews.StrategyAdvice(true, result.equity(), result.potOdds(), result.edge(),
+                result.action().name(), actionLabel(result.action(), result.raiseTo()), result.raiseTo(),
+                result.foldPercent(), result.checkCallPercent(), result.raisePercent(),
+                callAmount > 0 ? "跟注" : "过牌", result.summary(),
+                "基于随机范围模拟和底池赔率的近似 GTO 参考，不是完整求解器结果。");
     }
 
     public TableViews.TableView start(UUID tableId, UUID playerId, UUID reconnectToken) {
@@ -180,6 +211,23 @@ public class TableService {
     private TableViews.AdminSettings settingsView(PokerSettings.Values values) {
         return new TableViews.AdminSettings(values.totalChips(), values.minBuyIn(), values.defaultBuyIn(),
                 values.maxBuyIn(), values.smallBlind(), values.bigBlind());
+    }
+
+    private TableViews.StrategyAdvice unavailableAdvice() {
+        return new TableViews.StrategyAdvice(false, 0, 0, 0,
+                null, "等待下一局", null, 0, 0, 0,
+                "过牌/跟注", "开局后将根据你的手牌实时计算。",
+                "仅私人 AI 牌桌提供策略参考。");
+    }
+
+    private String actionLabel(ActionType action, Integer raiseTo) {
+        return switch (action) {
+            case FOLD -> "弃牌";
+            case CHECK -> "过牌";
+            case CALL -> "跟注";
+            case RAISE -> "加注至 " + raiseTo;
+            case ALL_IN -> "全押";
+        };
     }
 
     private PokerTable requireTable(UUID tableId) {
