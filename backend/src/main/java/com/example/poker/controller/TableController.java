@@ -30,12 +30,12 @@ public class TableController {
     @ResponseStatus(HttpStatus.CREATED)
     public TableViews.SessionView create(@Valid @RequestBody Requests.CreateTable request) {
         return service.create(request.tableName(), request.nickname(), request.maxPlayers(),
-                request.privateTable(), request.aiPlayers());
+                request.privateTable(), request.aiPlayers(), request.buyIn());
     }
 
     @PostMapping("/{tableId}/join")
     public TableViews.SessionView join(@PathVariable UUID tableId, @Valid @RequestBody Requests.JoinTable request) {
-        return service.join(tableId, request.nickname());
+        return service.join(tableId, request.nickname(), request.buyIn());
     }
 
     @GetMapping("/{tableId}")
@@ -59,6 +59,18 @@ public class TableController {
     public TableViews.TableView act(@PathVariable UUID tableId, @Valid @RequestBody Requests.PlayerAction request) {
         return service.act(tableId, request.playerId(), request.reconnectToken(),
                 request.type(), request.raiseTo());
+    }
+
+    @PostMapping("/{tableId}/chips/top-up")
+    public TableViews.TableView topUp(@PathVariable UUID tableId,
+                                      @Valid @RequestBody Requests.ChipCommand request) {
+        return service.topUp(tableId, request.playerId(), request.reconnectToken(), request.amount());
+    }
+
+    @PostMapping("/{tableId}/chips/cash-out")
+    public TableViews.TableView cashOut(@PathVariable UUID tableId,
+                                        @Valid @RequestBody Requests.ChipCommand request) {
+        return service.cashOut(tableId, request.playerId(), request.reconnectToken(), request.amount());
     }
 }
 
