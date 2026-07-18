@@ -14,7 +14,7 @@ class TableServiceReconnectTest {
     @Test
     void restoresOnlyWithThePrivateReconnectToken() {
         TableService service = new TableService(mock(SimpMessagingTemplate.class));
-        TableViews.SessionView session = service.create("重连测试", "Alice", 2);
+        TableViews.SessionView session = service.create("重连测试", "Alice", 2, false, 0);
         UUID tableId = session.table().id();
 
         TableViews.SessionView restored = service.reconnect(tableId, session.playerId(), session.reconnectToken());

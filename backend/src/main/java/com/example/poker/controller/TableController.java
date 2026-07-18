@@ -29,7 +29,8 @@ public class TableController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TableViews.SessionView create(@Valid @RequestBody Requests.CreateTable request) {
-        return service.create(request.tableName(), request.nickname(), request.maxPlayers());
+        return service.create(request.tableName(), request.nickname(), request.maxPlayers(),
+                request.privateTable(), request.aiPlayers());
     }
 
     @PostMapping("/{tableId}/join")

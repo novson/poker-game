@@ -13,6 +13,7 @@ public final class PokerTable {
     private final UUID id;
     private final String name;
     private final int maxPlayers;
+    private final boolean privateTable;
     private final int startingChips;
     private final int smallBlind;
     private final int bigBlind;
@@ -31,14 +32,25 @@ public final class PokerTable {
     private String message = "等待玩家加入";
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
-        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, Deck::new);
+        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, false, Deck::new);
+    }
+
+    public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
+                      boolean privateTable) {
+        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, privateTable, Deck::new);
     }
 
     PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
                Supplier<Deck> deckFactory) {
+        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, false, deckFactory);
+    }
+
+    private PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
+                       boolean privateTable, Supplier<Deck> deckFactory) {
         this.id = id;
         this.name = name;
         this.maxPlayers = maxPlayers;
+        this.privateTable = privateTable;
         this.startingChips = startingChips;
         this.smallBlind = smallBlind;
         this.bigBlind = bigBlind;
@@ -48,6 +60,7 @@ public final class PokerTable {
     public UUID id() { return id; }
     public String name() { return name; }
     public int maxPlayers() { return maxPlayers; }
+    public boolean privateTable() { return privateTable; }
     public int startingChips() { return startingChips; }
     public int smallBlind() { return smallBlind; }
     public int bigBlind() { return bigBlind; }
@@ -79,16 +92,48 @@ public final class PokerTable {
     }
 
     public synchronized PlayerState join(String nickname) {
+        PlayerState player = addPlayer(nickname, false);
+        message = nickname + " 加入了牌桌";
+        return player;
+    }
+
+    public synchronized PlayerState joinAi(String nickname) {
+        if (!privateTable) throw new IllegalStateException("只有私人牌桌可以加入 AI");
+        PlayerState player = addPlayer(nickname, true);
+        message = nickname + " 已就座";
+        return player;
+    }
+
+    private PlayerState addPlayer(String nickname, boolean ai) {
         if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
             throw new IllegalStateException("牌局进行中，暂不能加入");
         if (players.size() >= maxPlayers) throw new IllegalStateException("牌桌已满");
         if (players.stream().anyMatch(player -> player.nickname().equalsIgnoreCase(nickname)))
             throw new IllegalArgumentException("昵称已被使用");
-        PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), nickname, firstFreeSeat(), startingChips);
+        PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), nickname,
+                firstFreeSeat(), startingChips, ai);
         players.add(player);
         players.sort(Comparator.comparingInt(PlayerState::seat));
-        message = nickname + " 加入了牌桌";
         return player;
+    }
+
+    public synchronized PlayerState currentPlayer() {
+        if (currentTurnSeat < 0) return null;
+        return players.stream().filter(player -> player.seat() == currentTurnSeat).findFirst().orElse(null);
+    }
+
+    public synchronized int callAmount(UUID playerId) {
+        PlayerState player = requirePlayer(playerId);
+        return Math.max(0, currentBet - player.streetBet());
+    }
+
+    public synchronized int minimumRaiseTo() { return currentBet + minRaise; }
+
+    public synchronized boolean canRaise(UUID playerId) {
+        PlayerState player = requirePlayer(playerId);
+        int payment = minimumRaiseTo() - player.streetBet();
+        return player.status() == PlayerStatus.ACTIVE && player.raiseAllowed()
+                && payment > 0 && payment < player.chips();
     }
 
     public synchronized PlayerState authenticate(UUID playerId, UUID reconnectToken) {

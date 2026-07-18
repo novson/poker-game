@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PokerRoom from './components/PokerRoom.vue'
 import { api } from './services/api'
 import { clearPokerSession, readPokerSession, savePokerSession } from './services/session'
@@ -12,11 +12,20 @@ const reconnectToken = ref('')
 const nickname = ref(localStorage.getItem('poker.nickname') || '')
 const tableName = ref('周末牌局')
 const maxPlayers = ref(6)
+const privateTable = ref(false)
+const aiPlayers = ref(1)
 const busy = ref(false)
 const error = ref('')
 const connected = ref(false)
 const savedSession = ref(readPokerSession())
+const adminOpen = ref(false)
+const adminToken = ref(sessionStorage.getItem('poker.adminToken') || '')
+const adminAuthenticated = ref(false)
+const adminSettings = ref({ startingChips: 2000 })
+const adminTables = ref([])
 let stopSocket
+
+watch(maxPlayers, value => { aiPlayers.value = Math.min(aiPlayers.value, value - 1) })
 
 async function loadTables() {
   try { tables.value = await api.listTables() } catch (e) { error.value = e.message }
@@ -73,7 +82,13 @@ async function resumeSession(silent = false) {
 
 async function createTable() {
   if (!nickname.value.trim() || !tableName.value.trim()) return
-  const session = await run(() => api.createTable({ tableName: tableName.value, nickname: nickname.value, maxPlayers: maxPlayers.value }))
+  const session = await run(() => api.createTable({
+    tableName: tableName.value,
+    nickname: nickname.value,
+    maxPlayers: maxPlayers.value,
+    privateTable: privateTable.value,
+    aiPlayers: privateTable.value ? aiPlayers.value : 0
+  }))
   if (session) remember(session)
 }
 
@@ -120,6 +135,43 @@ async function initialize() {
   if (savedSession.value?.autoResume) await resumeSession(true)
 }
 
+async function openAdmin() {
+  adminOpen.value = true
+  if (adminToken.value) await authenticateAdmin()
+}
+
+async function authenticateAdmin() {
+  if (!adminToken.value.trim()) { error.value = '请输入管理员口令'; return }
+  const result = await run(() => Promise.all([
+    api.adminSettings(adminToken.value),
+    api.adminTables(adminToken.value)
+  ]))
+  if (!result) return
+  adminSettings.value = result[0]
+  adminTables.value = result[1]
+  adminAuthenticated.value = true
+  sessionStorage.setItem('poker.adminToken', adminToken.value)
+}
+
+async function saveAdminSettings() {
+  const latest = await run(() => api.updateAdminSettings(adminToken.value,
+    Number(adminSettings.value.startingChips)))
+  if (latest) adminSettings.value = latest
+}
+
+async function deleteAdminTable(item) {
+  if (!window.confirm(`确定删除牌桌“${item.name}”吗？在线玩家会立即退出。`)) return
+  const latest = await run(async () => {
+    await api.deleteAdminTable(adminToken.value, item.id)
+    return api.adminTables(adminToken.value)
+  })
+  if (latest) adminTables.value = latest
+}
+
+function closeAdmin() {
+  adminOpen.value = false
+}
+
 onMounted(initialize)
 onBeforeUnmount(() => stopSocket?.())
 </script>
@@ -127,7 +179,10 @@ onBeforeUnmount(() => stopSocket?.())
 <template>
   <PokerRoom v-if="table" :table="table" :player-id="playerId" :busy="busy" :connected="connected" @action="action" @start="start" @leave="leave" />
   <main v-else class="lobby-shell">
-    <nav class="brand"><span class="brand-mark">R</span><strong>RIVER ROOM</strong><small>实时德州扑克</small></nav>
+    <nav class="brand">
+      <span class="brand-mark">R</span><strong>RIVER ROOM</strong>
+      <div class="brand-actions"><small>实时德州扑克</small><button class="admin-link" type="button" @click="openAdmin">管理员</button></div>
+    </nav>
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">PRIVATE TABLES · REAL-TIME PLAY</p>
@@ -139,6 +194,8 @@ onBeforeUnmount(() => stopSocket?.())
         <label>你的昵称<input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" required /></label>
         <label>牌桌名称<input v-model="tableName" maxlength="30" required /></label>
         <label>人数上限<select v-model.number="maxPlayers"><option v-for="n in [2,3,4,5,6]" :key="n" :value="n">{{ n }} 人桌</option></select></label>
+        <label class="private-toggle"><input v-model="privateTable" type="checkbox" /><span><strong>私人 AI 牌桌</strong><small>不会显示在公开大厅，仅供你与 AI 对局</small></span></label>
+        <label v-if="privateTable">AI 选手数量<select v-model.number="aiPlayers"><option v-for="n in maxPlayers - 1" :key="n" :value="n">{{ n }} 位 AI</option></select></label>
         <button class="gold wide" :disabled="busy">{{ busy ? '正在创建…' : '创建并入座 →' }}</button>
       </form>
     </section>
@@ -160,6 +217,31 @@ onBeforeUnmount(() => stopSocket?.())
     </section>
     <div v-if="error" class="toast" @click="error = ''">{{ error }} ×</div>
   </main>
+  <div v-if="adminOpen" class="admin-overlay" @click.self="closeAdmin">
+    <section class="admin-panel">
+      <header><div><p class="eyebrow">ADMIN CONSOLE</p><h2>牌桌管理</h2></div><button class="panel-close" type="button" @click="closeAdmin">×</button></header>
+      <div v-if="!adminAuthenticated" class="admin-login">
+        <p>输入服务器管理员口令后，可修改新牌桌筹码并删除历史牌桌。</p>
+        <label>管理员口令<input v-model="adminToken" type="password" autocomplete="current-password" @keyup.enter="authenticateAdmin" /></label>
+        <button class="gold wide" type="button" :disabled="busy" @click="authenticateAdmin">进入管理面板</button>
+      </div>
+      <template v-else>
+        <form class="admin-settings" @submit.prevent="saveAdminSettings">
+          <div><strong>新牌桌初始筹码</strong><small>只影响之后创建的牌桌，现有牌桌不变</small></div>
+          <input v-model.number="adminSettings.startingChips" type="number" min="100" max="1000000" step="100" />
+          <button class="gold" :disabled="busy">保存</button>
+        </form>
+        <div class="admin-table-title"><strong>全部牌桌</strong><span>{{ adminTables.length }} 张</span></div>
+        <div v-if="adminTables.length" class="admin-table-list">
+          <article v-for="item in adminTables" :key="item.id">
+            <div><strong>{{ item.name }}</strong><small><span>{{ item.privateTable ? '私人桌' : '公开桌' }}</span> · {{ item.phaseLabel }} · {{ item.playerCount }}/{{ item.maxPlayers }} 人<span v-if="item.aiCount"> · {{ item.aiCount }} AI</span></small></div>
+            <button class="delete-table" type="button" :disabled="busy" @click="deleteAdminTable(item)">删除</button>
+          </article>
+        </div>
+        <p v-else class="admin-empty">当前没有牌桌</p>
+      </template>
+    </section>
+  </div>
   <div v-if="table && error" class="toast" @click="error = ''">{{ error }} ×</div>
 </template>
 
