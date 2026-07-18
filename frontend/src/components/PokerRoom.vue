@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
+import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canStart as getCanStart, minimumRaiseTo, validRaise } from '../services/rules'
 import { seatsFromViewer } from '../services/tableView'
 
@@ -18,11 +19,8 @@ const canRaise = computed(() => validRaise(props.table, me.value, Number(raiseTo
 const allInAllowed = computed(() => canAllIn(props.table, me.value))
 const seats = computed(() => seatsFromViewer(props.table.players, props.table.maxPlayers, props.playerId))
 const betweenHands = computed(() => ['WAITING', 'SHOWDOWN'].includes(props.table.phase))
-const maxTopUp = computed(() => Math.max(0, Math.min(me.value?.reserveChips || 0,
-  props.table.maxBuyIn - (me.value?.chips || 0))))
 const transferAmount = computed(() => Number(chipAmount.value) || 0)
-const canTopUp = computed(() => transferAmount.value > 0 && transferAmount.value <= maxTopUp.value
-  && (me.value?.chips || 0) + transferAmount.value >= props.table.minBuyIn)
+const canTopUp = computed(() => canTopUpAmount(props.table, me.value, transferAmount.value))
 const canCashOut = computed(() => {
   const remaining = (me.value?.chips || 0) - transferAmount.value
   return transferAmount.value > 0 && remaining >= 0
@@ -30,7 +28,16 @@ const canCashOut = computed(() => {
 })
 
 watch(minRaiseTo, value => { raiseTo.value = value }, { immediate: true })
-watch(() => props.table.bigBlind, value => { chipAmount.value = Math.max(value, value * 10) }, { immediate: true })
+watch([
+  () => props.table.phase,
+  () => me.value?.chips,
+  () => me.value?.reserveChips,
+  () => props.table.defaultBuyIn
+], () => {
+  if (!betweenHands.value || canTopUp.value) return
+  const suggestion = suggestedTopUp(props.table, me.value)
+  if (suggestion > 0) chipAmount.value = suggestion
+}, { immediate: true })
 
 function act(type) {
   emit('action', { type, raiseTo: type === 'RAISE' ? Number(raiseTo.value) : null })
