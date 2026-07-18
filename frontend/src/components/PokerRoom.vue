@@ -1,14 +1,19 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
-import { callAmount as getCallAmount, canAllIn, canStart as getCanStart, minimumRaiseTo, validRaise } from '../services/rules'
+import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
+  minimumRaiseTo, quickRaiseTo, validRaise } from '../services/rules'
 import { seatsFromViewer } from '../services/tableView'
 
 const props = defineProps({ table: Object, playerId: String, advice: Object, busy: Boolean, connected: Boolean })
 const emit = defineEmits(['action', 'chips', 'start', 'leave'])
 const raiseTo = ref(40)
 const chipAmount = ref(100)
+const autoNext = ref(localStorage.getItem('poker.autoNext') !== 'false')
+const autoCountdown = ref(0)
+const strategyExpanded = ref(false)
+let autoTimer
 
 const me = computed(() => props.table.players.find(player => player.id === props.playerId))
 const myTurn = computed(() => me.value?.currentTurn)
@@ -26,6 +31,20 @@ const canCashOut = computed(() => {
   return transferAmount.value > 0 && remaining >= 0
     && (remaining === 0 || remaining >= props.table.minBuyIn)
 })
+const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value))
+const quickRaises = computed(() => {
+  const options = [
+    { label: '½ 池', amount: quickRaiseTo(props.table, me.value, 0.5) },
+    { label: '¾ 池', amount: quickRaiseTo(props.table, me.value, 0.75) },
+    { label: '满池', amount: quickRaiseTo(props.table, me.value, 1) }
+  ]
+  if (props.advice?.recommendedAction === 'RAISE' && props.advice.raiseTo) {
+    options.unshift({ label: '建议', amount: props.advice.raiseTo })
+  }
+  const seen = new Set()
+  return options.filter(option => option.amount && validRaise(props.table, me.value, option.amount)
+    && !seen.has(option.amount) && seen.add(option.amount))
+})
 
 watch(minRaiseTo, value => { raiseTo.value = value }, { immediate: true })
 watch([
@@ -38,9 +57,43 @@ watch([
   const suggestion = suggestedTopUp(props.table, me.value)
   if (suggestion > 0) chipAmount.value = suggestion
 }, { immediate: true })
+watch([autoNextEligible, autoNext, () => props.busy], ([eligible, enabled, busy]) => {
+  clearAutoTimer()
+  if (!eligible || !enabled || busy) return
+  autoCountdown.value = 3
+  autoTimer = window.setInterval(() => {
+    autoCountdown.value--
+    if (autoCountdown.value <= 0) {
+      clearAutoTimer()
+      emit('start')
+    }
+  }, 1000)
+}, { immediate: true })
+watch(myTurn, value => {
+  if (value && navigator.vibrate) navigator.vibrate(70)
+})
 
 function act(type) {
   emit('action', { type, raiseTo: type === 'RAISE' ? Number(raiseTo.value) : null })
+}
+
+function quickRaise(amount) {
+  emit('action', { type: 'RAISE', raiseTo: Number(amount) })
+}
+
+function startHand() {
+  clearAutoTimer()
+  emit('start')
+}
+
+function clearAutoTimer() {
+  if (autoTimer) window.clearInterval(autoTimer)
+  autoTimer = null
+  autoCountdown.value = 0
+}
+
+function toggleAutoNext() {
+  localStorage.setItem('poker.autoNext', String(autoNext.value))
 }
 
 function transfer(type, amount = transferAmount.value) {
@@ -50,6 +103,8 @@ function transfer(type, amount = transferAmount.value) {
 function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
+
+onBeforeUnmount(clearAutoTimer)
 </script>
 
 <template>
@@ -113,12 +168,13 @@ function percent(value) {
         <button class="cash-all" :disabled="busy || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
       </div>
       <small>只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
+      <small v-if="table.privateTable && me.chips < table.minBuyIn" class="top-up-reminder">桌上筹码低于最低带入 {{ table.minBuyIn }}，自动下一局已暂停；补码后会自动恢复。</small>
     </section>
 
     <section v-if="table.privateTable && !betweenHands" class="strategy-panel">
       <header>
         <div><p class="eyebrow">REAL-TIME STRATEGY</p><strong>近似 GTO 实时参考</strong></div>
-        <span>{{ myTurn ? '轮到你行动' : '持续计算中' }}</span>
+        <div class="strategy-head-actions"><span>{{ myTurn ? '轮到你行动' : '持续计算中' }}</span><button type="button" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '详情' }}</button></div>
       </header>
       <template v-if="advice?.available">
         <div class="strategy-metrics">
@@ -127,13 +183,13 @@ function percent(value) {
           <div><small>胜率优势</small><strong :class="{ negative: advice.edge < 0 }">{{ advice.edge >= 0 ? '+' : '' }}{{ percent(advice.edge) }}</strong></div>
           <div class="strategy-action"><small>建议动作</small><strong>{{ advice.actionLabel }}</strong></div>
         </div>
-        <div class="strategy-mix">
+        <div v-if="strategyExpanded" class="strategy-mix">
           <div><span>弃牌 {{ advice.foldPercent }}%</span><i><b :style="{ width: `${advice.foldPercent}%` }"></b></i></div>
           <div><span>{{ advice.passiveLabel }} {{ advice.checkCallPercent }}%</span><i><b :style="{ width: `${advice.checkCallPercent}%` }"></b></i></div>
           <div><span>加注 {{ advice.raisePercent }}%</span><i><b :style="{ width: `${advice.raisePercent}%` }"></b></i></div>
         </div>
         <p>{{ advice.summary }}</p>
-        <small class="strategy-note">{{ advice.note }}</small>
+        <small v-if="strategyExpanded" class="strategy-note">{{ advice.note }}</small>
       </template>
       <div v-else class="strategy-loading">正在根据手牌、公共牌和对手数量模拟胜率…</div>
     </section>
@@ -146,14 +202,21 @@ function percent(value) {
         <small v-else>至少两人即可开始下一局</small>
       </div>
       <div v-if="myTurn" class="actions">
-        <button class="danger" :disabled="busy" @click="act('FOLD')">弃牌</button>
-        <button v-if="callAmount === 0" :disabled="busy" @click="act('CHECK')">过牌</button>
-        <button v-else :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
+        <button class="danger" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy" @click="act('FOLD')">弃牌</button>
+        <button v-if="callAmount === 0" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy" @click="act('CHECK')">过牌</button>
+        <button v-else :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
+        <div v-if="quickRaises.length" class="quick-raises">
+          <button v-for="option in quickRaises" :key="option.amount" :class="{ recommended: option.label === '建议' }" :disabled="busy" @click="quickRaise(option.amount)">{{ option.label }} <strong>{{ option.amount }}</strong></button>
+        </div>
         <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
-        <button class="gold" :disabled="busy || !canRaise" @click="act('RAISE')">加注</button>
-        <button v-if="callAmount < me.chips" class="all-in-button" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
+        <button class="gold" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !canRaise" @click="act('RAISE')">自定义加注</button>
+        <button v-if="callAmount < me.chips" class="all-in-button" :class="{ recommended: advice?.recommendedAction === 'ALL_IN' }" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
       </div>
-      <button v-else-if="canStart" class="gold start-button" :disabled="busy" @click="emit('start')">开始一局</button>
+      <div v-else-if="canStart" class="next-hand-controls">
+        <button class="gold start-button" :disabled="busy" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
+        <button v-if="autoCountdown" class="cancel-countdown" type="button" @click="clearAutoTimer">取消倒计时</button>
+        <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
+      </div>
     </section>
     <p class="mvp-note">规则：2–6 人、盲注 {{ table.smallBlind }}/{{ table.bigBlind }}、带入 {{ table.minBuyIn }}–{{ table.maxBuyIn }}；支持补码、回收、全押、边池与断线身份恢复。</p>
   </main>
