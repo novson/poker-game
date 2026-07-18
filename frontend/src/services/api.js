@@ -24,6 +24,7 @@ export const api = {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
   }),
   getTable: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}?${new URLSearchParams({ playerId, reconnectToken })}`),
+  advice: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/advice?${new URLSearchParams({ playerId, reconnectToken })}`),
   start: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/start`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
   }),

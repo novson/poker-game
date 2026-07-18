@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class TableServiceAiTest {
@@ -54,5 +55,17 @@ class TableServiceAiTest {
             }
             assertThat(table.phase().name()).isEqualTo("SHOWDOWN");
         }
+    }
+
+    @Test
+    void strategyAdviceIsAvailableOnlyForPrivateTables() {
+        TableService service = new TableService(mock(SimpMessagingTemplate.class));
+        TableViews.SessionView privateSession = service.create("私人训练", "Alice", 2, true, 1);
+        TableViews.SessionView publicSession = service.create("公开桌", "Bob", 2, false, 0);
+
+        assertThat(service.advice(privateSession.table().id(), privateSession.playerId(),
+                privateSession.reconnectToken()).available()).isFalse();
+        assertThatThrownBy(() -> service.advice(publicSession.table().id(), publicSession.playerId(),
+                publicSession.reconnectToken())).hasMessageContaining("仅支持私人 AI 牌桌");
     }
 }
