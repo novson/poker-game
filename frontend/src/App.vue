@@ -275,8 +275,12 @@ onBeforeUnmount(() => stopSocket?.())
   <main v-else class="lobby-shell">
     <nav class="brand">
       <span class="brand-mark">R</span><strong>RIVER ROOM</strong>
-      <div class="brand-actions"><small>实时德州扑克</small><button class="admin-link" type="button" @click="openAdmin">管理员</button></div>
+      <div class="brand-actions"><small>实时德州扑克</small><a class="lobby-link" href="#open-tables">牌桌</a><button class="admin-link" type="button" @click="openAdmin">管理员</button></div>
     </nav>
+    <article v-if="savedSession" class="resume-table resume-banner">
+      <div><p class="eyebrow">YOUR SEAT IS SAVED</p><strong>{{ savedSession.tableName || '上次牌局' }}</strong><small>{{ savedSession.nickname || nickname }} · 座位与筹码已保留</small></div>
+      <button class="gold" :disabled="busy" @click="resumeSession()">继续牌局 →</button>
+    </article>
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">PRIVATE TABLES · REAL-TIME PLAY</p>
@@ -295,12 +299,8 @@ onBeforeUnmount(() => stopSocket?.())
       </form>
     </section>
 
-    <section class="tables-section">
+    <section id="open-tables" class="tables-section">
       <div class="section-title"><div><p class="eyebrow">OPEN TABLES</p><h2>公开牌桌</h2></div><button class="ghost-button" @click="loadTables">刷新</button></div>
-      <article v-if="savedSession" class="resume-table">
-        <div><p class="eyebrow">YOUR SEAT IS SAVED</p><strong>{{ savedSession.tableName || '上次牌局' }}</strong><small>{{ savedSession.nickname || nickname }}</small></div>
-        <button class="gold" :disabled="busy" @click="resumeSession()">继续牌局 →</button>
-      </article>
       <div v-if="tables.length" class="table-list">
         <article v-for="item in tables" :key="item.id" class="table-row">
           <div><span class="phase-dot" :class="{ waiting: item.phase === 'WAITING' || item.phase === 'SHOWDOWN' }"></span><strong>{{ item.name }}</strong><small>{{ item.phaseLabel }}</small></div>

@@ -173,7 +173,14 @@ onBeforeUnmount(clearAutoTimer)
       <small v-if="table.privateTable && me.chips < table.minBuyIn" class="top-up-reminder">桌上筹码低于最低带入 {{ table.minBuyIn }}，自动下一局已暂停；补码后会自动恢复。</small>
     </section>
 
-    <section class="control-panel" :class="{ 'turn-controls': myTurn }">
+    <section class="control-panel" :class="{ 'turn-controls': myTurn, busy }" :aria-busy="busy">
+      <div v-if="myTurn" class="turn-glance">
+        <div class="turn-glance-cards" aria-label="你的手牌">
+          <PlayingCard v-for="(card, index) in me.cards" :key="index" :value="card" small />
+        </div>
+        <div class="turn-glance-stack"><small>你的筹码</small><strong>{{ me.chips }}</strong></div>
+        <div class="turn-glance-numbers"><span>底池 <strong>{{ table.pot }}</strong></span><span>跟注 <strong>{{ callAmount }}</strong></span></div>
+      </div>
       <div class="status-copy">
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · 跟注额 {{ callAmount }}</small>
