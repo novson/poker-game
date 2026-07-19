@@ -14,7 +14,7 @@ const nickname = ref(localStorage.getItem('poker.nickname') || '')
 const tableName = ref('周末牌局')
 const maxPlayers = ref(6)
 const privateTable = ref(false)
-const aiPlayers = ref(1)
+const aiPlayers = ref(maxPlayers.value - 1)
 const tableSettings = ref({ totalChips: 10000, minBuyIn: 1000, defaultBuyIn: 2000,
   maxBuyIn: 4000, smallBlind: 10, bigBlind: 20 })
 const buyIn = ref(2000)
@@ -45,7 +45,10 @@ const settingsRatios = computed(() => {
 let stopSocket
 let adviceRequest = 0
 
-watch(maxPlayers, value => { aiPlayers.value = Math.min(aiPlayers.value, value - 1) })
+watch(maxPlayers, value => { aiPlayers.value = value - 1 })
+watch(privateTable, enabled => {
+  if (enabled) aiPlayers.value = maxPlayers.value - 1
+})
 
 async function loadTables() {
   try {
