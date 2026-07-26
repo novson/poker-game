@@ -22,6 +22,7 @@ const joinBuyIns = ref({})
 const busy = ref(false)
 const error = ref('')
 const connected = ref(false)
+const emoteEvent = ref(null)
 const savedSession = ref(readPokerSession())
 const adminOpen = ref(false)
 const adminToken = ref(sessionStorage.getItem('poker.adminToken') || '')
@@ -165,7 +166,9 @@ async function loadAdvice() {
 
 function connect() {
   stopSocket?.()
-  stopSocket = watchTable(table.value.id, refresh, value => { connected.value = value })
+  stopSocket = watchTable(table.value.id, refresh, value => { connected.value = value }, event => {
+    emoteEvent.value = { ...event, receivedAt: Date.now() }
+  })
 }
 
 async function start() {
@@ -200,6 +203,14 @@ async function adjustChips(type, amount) {
   const latest = await run(() => method(table.value.id, playerId.value, reconnectToken.value,
     Number(amount)))
   if (latest) table.value = latest
+}
+
+async function sendEmote(emoteId) {
+  try {
+    await api.emote(table.value.id, playerId.value, reconnectToken.value, emoteId)
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 async function initialize() {
@@ -274,7 +285,9 @@ onBeforeUnmount(() => stopSocket?.())
 </script>
 
 <template>
-  <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice" :busy="busy" :connected="connected" @action="action" @chips="adjustChips" @start="start" @leave="leave" />
+  <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice"
+    :busy="busy" :connected="connected" :emote-event="emoteEvent"
+    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" />
   <main v-else class="lobby-shell">
     <nav class="brand">
       <span class="brand-mark">R</span><strong>RIVER ROOM</strong>
