@@ -1,20 +1,38 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
+import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
   minimumRaiseTo, quickRaiseTo, validRaise } from '../services/rules'
 import { seatsFromViewer } from '../services/tableView'
 
-const props = defineProps({ table: Object, playerId: String, advice: Object, busy: Boolean, connected: Boolean })
-const emit = defineEmits(['action', 'chips', 'start', 'leave'])
+const props = defineProps({
+  table: Object,
+  playerId: String,
+  advice: Object,
+  busy: Boolean,
+  connected: Boolean,
+  emoteEvent: Object
+})
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave'])
+const savedAudio = readAudioPreferences()
+const pokerAudio = createPokerAudio()
 const raiseTo = ref(40)
 const chipAmount = ref(100)
 const autoNext = ref(localStorage.getItem('poker.autoNext') !== 'false')
 const autoCountdown = ref(0)
 const strategyExpanded = ref(false)
 const customRaiseExpanded = ref(false)
+const soundPanelOpen = ref(false)
+const voiceTrayOpen = ref(false)
+const musicEnabled = ref(savedAudio.musicEnabled)
+const voiceEnabled = ref(savedAudio.voiceEnabled)
+const audioVolume = ref(savedAudio.volume)
+const musicStatus = ref(savedAudio.musicEnabled ? '点击页面后开始播放' : '')
+const activeEmote = ref(null)
 let autoTimer
+let emoteTimer
 
 const me = computed(() => props.table.players.find(player => player.id === props.playerId))
 const myTurn = computed(() => me.value?.currentTurn)
@@ -73,6 +91,17 @@ watch([autoNextEligible, autoNext, () => props.busy], ([eligible, enabled, busy]
 watch(myTurn, value => {
   if (value && navigator.vibrate) navigator.vibrate(70)
   if (!value) customRaiseExpanded.value = false
+  if (value) {
+    soundPanelOpen.value = false
+    voiceTrayOpen.value = false
+  }
+})
+watch(() => props.emoteEvent, event => {
+  if (!event || event.type !== 'EMOTE') return
+  activeEmote.value = event
+  if (voiceEnabled.value) pokerAudio.speak(event.text, audioVolume.value)
+  if (emoteTimer) window.clearTimeout(emoteTimer)
+  emoteTimer = window.setTimeout(() => { activeEmote.value = null }, 3200)
 })
 
 function act(type) {
@@ -98,6 +127,58 @@ function toggleAutoNext() {
   localStorage.setItem('poker.autoNext', String(autoNext.value))
 }
 
+function saveSoundSettings() {
+  saveAudioPreferences({
+    musicEnabled: musicEnabled.value,
+    volume: audioVolume.value,
+    voiceEnabled: voiceEnabled.value
+  })
+}
+
+function toggleSoundPanel() {
+  soundPanelOpen.value = !soundPanelOpen.value
+  if (soundPanelOpen.value) voiceTrayOpen.value = false
+}
+
+function unlockAudio() {
+  if (!musicEnabled.value) return
+  pokerAudio.startMusic(audioVolume.value).then(playing => {
+    musicStatus.value = playing ? '正在播放' : '播放被浏览器阻止，请再次点击'
+  })
+}
+
+async function toggleMusic() {
+  saveSoundSettings()
+  if (musicEnabled.value) {
+    musicStatus.value = '正在启动…'
+    const playing = await pokerAudio.startMusic(audioVolume.value)
+    musicStatus.value = playing ? '正在播放' : '播放被浏览器阻止，请再次点击'
+  } else {
+    pokerAudio.stopMusic()
+    musicStatus.value = ''
+  }
+}
+
+function updateVolume() {
+  pokerAudio.setVolume(audioVolume.value)
+  saveSoundSettings()
+}
+
+function toggleVoice() {
+  saveSoundSettings()
+  if (!voiceEnabled.value) window.speechSynthesis?.cancel()
+}
+
+function sendVoiceEmote(emoteId) {
+  voiceTrayOpen.value = false
+  emit('emote', emoteId)
+}
+
+function toggleVoiceTray() {
+  voiceTrayOpen.value = !voiceTrayOpen.value
+  if (voiceTrayOpen.value) soundPanelOpen.value = false
+}
+
 function transfer(type, amount = transferAmount.value) {
   emit('chips', type, Number(amount))
 }
@@ -106,21 +187,51 @@ function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
 
-onBeforeUnmount(clearAutoTimer)
+onBeforeUnmount(() => {
+  clearAutoTimer()
+  if (emoteTimer) window.clearTimeout(emoteTimer)
+  pokerAudio.destroy()
+})
 </script>
 
 <template>
-  <main class="room-shell" :class="{ 'has-turn-controls': myTurn }">
+  <main class="room-shell" :class="{
+    'has-turn-controls': myTurn,
+    'active-hand': !betweenHands,
+    'between-hands': betweenHands,
+    'can-start': canStart,
+    'custom-raise-open': myTurn && customRaiseExpanded
+  }" @pointerdown="unlockAudio">
     <header class="room-header">
       <button class="ghost-button" @click="emit('leave')">← 暂离牌桌</button>
       <div>
         <p class="eyebrow">{{ table.phaseLabel }} · 第 {{ table.handNumber || 0 }} 局</p>
         <h1>{{ table.name }}</h1>
       </div>
-      <div class="connection" :class="{ online: connected }">
-        <span></span>{{ connected ? '实时在线' : '正在重连' }}
+      <div class="room-tools">
+        <div class="connection" :class="{ online: connected }">
+          <span></span>{{ connected ? '实时在线' : '正在重连' }}
+        </div>
+        <button class="sound-settings-button" type="button" :class="{ active: musicEnabled || voiceEnabled }"
+          :aria-expanded="soundPanelOpen" @click="toggleSoundPanel">♫ 声音</button>
       </div>
     </header>
+
+    <section v-if="soundPanelOpen" class="sound-panel" aria-label="声音设置">
+      <header><strong>声音设置</strong><button type="button" @click="soundPanelOpen = false">关闭</button></header>
+      <label class="sound-toggle">
+        <span><strong>背景音乐</strong><small :class="{ playing: musicStatus === '正在播放' }">{{ musicStatus || '轻柔牌桌氛围音乐' }}</small></span>
+        <input v-model="musicEnabled" type="checkbox" @change="toggleMusic" />
+      </label>
+      <label class="volume-setting">
+        <span>音量 <strong>{{ audioVolume }}%</strong></span>
+        <input v-model.number="audioVolume" type="range" min="0" max="100" step="1" @input="updateVolume" />
+      </label>
+      <label class="sound-toggle">
+        <span><strong>语音表情</strong><small>朗读牌桌玩家的快捷短语</small></span>
+        <input v-model="voiceEnabled" type="checkbox" @change="toggleVoice" />
+      </label>
+    </section>
 
     <section class="table-stage">
       <div class="poker-table">
@@ -141,6 +252,12 @@ onBeforeUnmount(clearAutoTimer)
 
         <div v-for="seat in seats" :key="seat.actualSeat" class="seat" :class="[`seat-${seat.position}`, { empty: !seat.player, active: seat.player?.currentTurn, mine: seat.player?.id === playerId, 'all-in': seat.player?.status === 'ALL_IN' }]">
           <template v-if="seat.player">
+            <Transition name="voice-pop">
+              <div v-if="activeEmote?.playerId === seat.player.id" class="voice-bubble">
+                <span>{{ VOICE_EMOTES.find(item => item.id === activeEmote.emoteId)?.icon || '💬' }}</span>
+                {{ activeEmote.text }}
+              </div>
+            </Transition>
             <div class="hole-cards">
               <PlayingCard v-for="(card, index) in seat.player.cards" :key="index" :value="card" small />
             </div>
@@ -162,6 +279,7 @@ onBeforeUnmount(clearAutoTimer)
         <span>桌上 <strong>{{ me.chips }}</strong></span>
         <span>备用 <strong>{{ me.reserveChips }}</strong></span>
         <span>当前总计 <strong>{{ me.totalChips }}</strong></span>
+        <span v-if="me.chips < table.minBuyIn" class="bankroll-warning">需要补码</span>
       </div>
       <div class="bankroll-actions">
         <label>调整金额<input v-model.number="chipAmount" type="number" min="1" :step="table.bigBlind" /></label>
@@ -207,6 +325,16 @@ onBeforeUnmount(clearAutoTimer)
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
       </div>
     </section>
+    <aside class="voice-emote-dock" :class="{ expanded: voiceTrayOpen }">
+      <Transition name="voice-tray">
+        <div v-if="voiceTrayOpen" class="voice-emote-list">
+          <button v-for="item in VOICE_EMOTES" :key="item.id" type="button"
+            @click="sendVoiceEmote(item.id)"><span>{{ item.icon }}</span>{{ item.label }}</button>
+        </div>
+      </Transition>
+      <button class="voice-emote-trigger" type="button" :aria-expanded="voiceTrayOpen"
+        @click="toggleVoiceTray"><span>🎙</span>{{ voiceTrayOpen ? '收起' : '语音表情' }}</button>
+    </aside>
     <p class="mvp-note">规则：2–6 人、盲注 {{ table.smallBlind }}/{{ table.bigBlind }}、带入 {{ table.minBuyIn }}–{{ table.maxBuyIn }}；支持补码、回收、全押、边池与断线身份恢复。</p>
 
     <section v-if="table.privateTable && !betweenHands" class="strategy-panel" :class="{ expanded: strategyExpanded }">

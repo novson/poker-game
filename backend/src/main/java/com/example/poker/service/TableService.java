@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.security.SecureRandom;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,9 +23,19 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 public class TableService {
     private static final List<String> AI_NAMES = List.of("AI·小河", "AI·阿福", "AI·梅花", "AI·红桃", "AI·黑桃");
+    private static final Map<String, String> EMOTES = Map.of(
+            "nice-hand", "打得不错",
+            "good-luck", "祝你好运",
+            "thinking", "让我想想",
+            "call-you", "跟你到底",
+            "wow", "好牌",
+            "cheers", "干得漂亮"
+    );
+    private static final long EMOTE_COOLDOWN_NANOS = 1_200_000_000L;
 
     private final ConcurrentMap<UUID, PokerTable> tables = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, AtomicLong> versions = new ConcurrentHashMap<>();
+    private final ConcurrentMap<UUID, Long> lastEmotes = new ConcurrentHashMap<>();
     private final SimpMessagingTemplate messaging;
     private final PokerSettings settings;
     private final PokerAiStrategy aiStrategy = new PokerAiStrategy(new SecureRandom(), 260);
@@ -173,8 +184,29 @@ public class TableService {
         return TableViews.TableView.from(table, playerId);
     }
 
+    public TableViews.TableEvent emote(UUID tableId, UUID playerId, UUID reconnectToken, String emoteId) {
+        PokerTable table = requireTable(tableId);
+        PlayerState player = table.authenticate(playerId, reconnectToken);
+        String text = EMOTES.get(emoteId);
+        if (text == null) throw new IllegalArgumentException("不支持的语音表情");
+
+        long now = System.nanoTime();
+        Long previous = lastEmotes.put(playerId, now);
+        if (previous != null && now - previous < EMOTE_COOLDOWN_NANOS) {
+            lastEmotes.put(playerId, previous);
+            throw new IllegalArgumentException("语音表情发送太快，请稍后再试");
+        }
+
+        long version = versions.computeIfAbsent(tableId, ignored -> new AtomicLong()).get();
+        TableViews.TableEvent event = new TableViews.TableEvent(
+                tableId, version, "EMOTE", player.id(), player.nickname(), emoteId, text);
+        messaging.convertAndSend("/topic/tables/" + tableId, event);
+        return event;
+    }
+
     public void delete(UUID tableId) {
-        requireTable(tableId);
+        PokerTable table = requireTable(tableId);
+        table.players().forEach(player -> lastEmotes.remove(player.id()));
         tables.remove(tableId);
         versions.remove(tableId);
         messaging.convertAndSend("/topic/tables/" + tableId, new TableViews.TableEvent(tableId, -1));
