@@ -24,6 +24,7 @@ const autoNext = ref(localStorage.getItem('poker.autoNext') !== 'false')
 const autoCountdown = ref(0)
 const strategyExpanded = ref(false)
 const customRaiseExpanded = ref(false)
+const chipManagerOpen = ref(false)
 const soundPanelOpen = ref(false)
 const voiceTrayOpen = ref(false)
 const musicEnabled = ref(savedAudio.musicEnabled)
@@ -95,6 +96,10 @@ watch(myTurn, value => {
     soundPanelOpen.value = false
     voiceTrayOpen.value = false
   }
+})
+watch([betweenHands, () => me.value?.chips], ([between, chips]) => {
+  if (!between) chipManagerOpen.value = false
+  else if ((chips || 0) < props.table.minBuyIn) chipManagerOpen.value = true
 })
 watch(() => props.emoteEvent, event => {
   if (!event || event.type !== 'EMOTE') return
@@ -200,6 +205,8 @@ onBeforeUnmount(() => {
     'active-hand': !betweenHands,
     'between-hands': betweenHands,
     'can-start': canStart,
+    'chip-manager-open': betweenHands && chipManagerOpen,
+    'strategy-open': !betweenHands && strategyExpanded,
     'custom-raise-open': myTurn && customRaiseExpanded
   }" @pointerdown="unlockAudio">
     <header class="room-header">
@@ -280,14 +287,16 @@ onBeforeUnmount(() => {
         <span>备用 <strong>{{ me.reserveChips }}</strong></span>
         <span>当前总计 <strong>{{ me.totalChips }}</strong></span>
         <span v-if="me.chips < table.minBuyIn" class="bankroll-warning">需要补码</span>
+        <button class="chip-manager-toggle" type="button" :aria-expanded="chipManagerOpen"
+          @click="chipManagerOpen = !chipManagerOpen">{{ chipManagerOpen ? '收起' : '管理筹码' }}</button>
       </div>
-      <div class="bankroll-actions">
+      <div v-if="chipManagerOpen" class="bankroll-actions">
         <label>调整金额<input v-model.number="chipAmount" type="number" min="1" :step="table.bigBlind" /></label>
         <button :disabled="busy || !canTopUp" @click="transfer('TOP_UP')">补码</button>
         <button :disabled="busy || !canCashOut" @click="transfer('CASH_OUT')">回收</button>
         <button class="cash-all" :disabled="busy || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
       </div>
-      <small>只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
+      <small v-if="chipManagerOpen">只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
       <small v-if="table.privateTable && me.chips < table.minBuyIn" class="top-up-reminder">桌上筹码低于最低带入 {{ table.minBuyIn }}，自动下一局已暂停；补码后会自动恢复。</small>
     </section>
 
@@ -305,14 +314,14 @@ onBeforeUnmount(() => {
         <small v-else-if="!canStart">等待其他玩家行动</small>
         <small v-else>至少两人即可开始下一局</small>
       </div>
-      <div v-if="myTurn" class="actions">
-        <button class="danger" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy" @click="act('FOLD')">弃牌</button>
-        <button v-if="callAmount === 0" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy" @click="act('CHECK')">过牌</button>
-        <button v-else :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
+      <div v-if="myTurn" class="actions" aria-label="牌局操作">
+        <button class="danger action-fold" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy" @click="act('FOLD')">弃牌</button>
+        <button v-if="callAmount === 0" class="action-call" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy" @click="act('CHECK')">过牌</button>
+        <button v-else class="action-call" :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
         <div v-if="quickRaises.length" class="quick-raises">
           <button v-for="option in quickRaises" :key="option.amount" :class="{ recommended: option.label === '建议' }" :disabled="busy" @click="quickRaise(option.amount)">{{ option.label }} <strong>{{ option.amount }}</strong></button>
         </div>
-        <button class="custom-raise-toggle" type="button" :class="{ active: customRaiseExpanded }" @click="customRaiseExpanded = !customRaiseExpanded">{{ customRaiseExpanded ? '收起自定义' : '自定义加注' }}</button>
+        <button class="custom-raise-toggle action-raise" type="button" :class="{ active: customRaiseExpanded }" @click="customRaiseExpanded = !customRaiseExpanded">{{ customRaiseExpanded ? '收起自定义' : '自定义加注' }}</button>
         <button v-if="callAmount < me.chips" class="all-in-button" :class="{ recommended: advice?.recommendedAction === 'ALL_IN' }" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
         <template v-if="customRaiseExpanded">
           <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
@@ -340,7 +349,7 @@ onBeforeUnmount(() => {
     <section v-if="table.privateTable && !betweenHands" class="strategy-panel" :class="{ expanded: strategyExpanded }">
       <header>
         <div><p class="eyebrow">OPTIONAL STRATEGY</p><strong>胜率与近似 GTO 参考</strong></div>
-        <div class="strategy-head-actions"><span>需要时再查看</span><button type="button" :aria-expanded="strategyExpanded" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '展开查看' }}</button></div>
+        <div class="strategy-head-actions"><span>需要时再查看</span><button type="button" :aria-expanded="strategyExpanded" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '策略' }}</button></div>
       </header>
       <template v-if="strategyExpanded && advice?.available">
         <div class="strategy-metrics">
