@@ -1,20 +1,39 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
+import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
   minimumRaiseTo, quickRaiseTo, validRaise } from '../services/rules'
 import { seatsFromViewer } from '../services/tableView'
 
-const props = defineProps({ table: Object, playerId: String, advice: Object, busy: Boolean, connected: Boolean })
-const emit = defineEmits(['action', 'chips', 'start', 'leave'])
+const props = defineProps({
+  table: Object,
+  playerId: String,
+  advice: Object,
+  busy: Boolean,
+  connected: Boolean,
+  emoteEvent: Object
+})
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave'])
+const savedAudio = readAudioPreferences()
+const pokerAudio = createPokerAudio()
 const raiseTo = ref(40)
 const chipAmount = ref(100)
 const autoNext = ref(localStorage.getItem('poker.autoNext') !== 'false')
 const autoCountdown = ref(0)
 const strategyExpanded = ref(false)
 const customRaiseExpanded = ref(false)
+const chipManagerOpen = ref(false)
+const soundPanelOpen = ref(false)
+const voiceTrayOpen = ref(false)
+const musicEnabled = ref(savedAudio.musicEnabled)
+const voiceEnabled = ref(savedAudio.voiceEnabled)
+const audioVolume = ref(savedAudio.volume)
+const musicStatus = ref(savedAudio.musicEnabled ? '点击页面后开始播放' : '')
+const activeEmote = ref(null)
 let autoTimer
+let emoteTimer
 
 const me = computed(() => props.table.players.find(player => player.id === props.playerId))
 const myTurn = computed(() => me.value?.currentTurn)
@@ -73,6 +92,21 @@ watch([autoNextEligible, autoNext, () => props.busy], ([eligible, enabled, busy]
 watch(myTurn, value => {
   if (value && navigator.vibrate) navigator.vibrate(70)
   if (!value) customRaiseExpanded.value = false
+  if (value) {
+    soundPanelOpen.value = false
+    voiceTrayOpen.value = false
+  }
+})
+watch([betweenHands, () => me.value?.chips], ([between, chips]) => {
+  if (!between) chipManagerOpen.value = false
+  else if ((chips || 0) < props.table.minBuyIn) chipManagerOpen.value = true
+})
+watch(() => props.emoteEvent, event => {
+  if (!event || event.type !== 'EMOTE') return
+  activeEmote.value = event
+  if (voiceEnabled.value) pokerAudio.speak(event.text, audioVolume.value)
+  if (emoteTimer) window.clearTimeout(emoteTimer)
+  emoteTimer = window.setTimeout(() => { activeEmote.value = null }, 3200)
 })
 
 function act(type) {
@@ -98,6 +132,58 @@ function toggleAutoNext() {
   localStorage.setItem('poker.autoNext', String(autoNext.value))
 }
 
+function saveSoundSettings() {
+  saveAudioPreferences({
+    musicEnabled: musicEnabled.value,
+    volume: audioVolume.value,
+    voiceEnabled: voiceEnabled.value
+  })
+}
+
+function toggleSoundPanel() {
+  soundPanelOpen.value = !soundPanelOpen.value
+  if (soundPanelOpen.value) voiceTrayOpen.value = false
+}
+
+function unlockAudio() {
+  if (!musicEnabled.value) return
+  pokerAudio.startMusic(audioVolume.value).then(playing => {
+    musicStatus.value = playing ? '正在播放' : '播放被浏览器阻止，请再次点击'
+  })
+}
+
+async function toggleMusic() {
+  saveSoundSettings()
+  if (musicEnabled.value) {
+    musicStatus.value = '正在启动…'
+    const playing = await pokerAudio.startMusic(audioVolume.value)
+    musicStatus.value = playing ? '正在播放' : '播放被浏览器阻止，请再次点击'
+  } else {
+    pokerAudio.stopMusic()
+    musicStatus.value = ''
+  }
+}
+
+function updateVolume() {
+  pokerAudio.setVolume(audioVolume.value)
+  saveSoundSettings()
+}
+
+function toggleVoice() {
+  saveSoundSettings()
+  if (!voiceEnabled.value) window.speechSynthesis?.cancel()
+}
+
+function sendVoiceEmote(emoteId) {
+  voiceTrayOpen.value = false
+  emit('emote', emoteId)
+}
+
+function toggleVoiceTray() {
+  voiceTrayOpen.value = !voiceTrayOpen.value
+  if (voiceTrayOpen.value) soundPanelOpen.value = false
+}
+
 function transfer(type, amount = transferAmount.value) {
   emit('chips', type, Number(amount))
 }
@@ -106,21 +192,53 @@ function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
 
-onBeforeUnmount(clearAutoTimer)
+onBeforeUnmount(() => {
+  clearAutoTimer()
+  if (emoteTimer) window.clearTimeout(emoteTimer)
+  pokerAudio.destroy()
+})
 </script>
 
 <template>
-  <main class="room-shell" :class="{ 'has-turn-controls': myTurn }">
+  <main class="room-shell" :class="{
+    'has-turn-controls': myTurn,
+    'active-hand': !betweenHands,
+    'between-hands': betweenHands,
+    'can-start': canStart,
+    'chip-manager-open': betweenHands && chipManagerOpen,
+    'strategy-open': !betweenHands && strategyExpanded,
+    'custom-raise-open': myTurn && customRaiseExpanded
+  }" @pointerdown="unlockAudio">
     <header class="room-header">
       <button class="ghost-button" @click="emit('leave')">← 暂离牌桌</button>
       <div>
         <p class="eyebrow">{{ table.phaseLabel }} · 第 {{ table.handNumber || 0 }} 局</p>
         <h1>{{ table.name }}</h1>
       </div>
-      <div class="connection" :class="{ online: connected }">
-        <span></span>{{ connected ? '实时在线' : '正在重连' }}
+      <div class="room-tools">
+        <div class="connection" :class="{ online: connected }">
+          <span></span>{{ connected ? '实时在线' : '正在重连' }}
+        </div>
+        <button class="sound-settings-button" type="button" :class="{ active: musicEnabled || voiceEnabled }"
+          :aria-expanded="soundPanelOpen" @click="toggleSoundPanel">♫ 声音</button>
       </div>
     </header>
+
+    <section v-if="soundPanelOpen" class="sound-panel" aria-label="声音设置">
+      <header><strong>声音设置</strong><button type="button" @click="soundPanelOpen = false">关闭</button></header>
+      <label class="sound-toggle">
+        <span><strong>背景音乐</strong><small :class="{ playing: musicStatus === '正在播放' }">{{ musicStatus || '轻柔牌桌氛围音乐' }}</small></span>
+        <input v-model="musicEnabled" type="checkbox" @change="toggleMusic" />
+      </label>
+      <label class="volume-setting">
+        <span>音量 <strong>{{ audioVolume }}%</strong></span>
+        <input v-model.number="audioVolume" type="range" min="0" max="100" step="1" @input="updateVolume" />
+      </label>
+      <label class="sound-toggle">
+        <span><strong>语音表情</strong><small>朗读牌桌玩家的快捷短语</small></span>
+        <input v-model="voiceEnabled" type="checkbox" @change="toggleVoice" />
+      </label>
+    </section>
 
     <section class="table-stage">
       <div class="poker-table">
@@ -141,6 +259,12 @@ onBeforeUnmount(clearAutoTimer)
 
         <div v-for="seat in seats" :key="seat.actualSeat" class="seat" :class="[`seat-${seat.position}`, { empty: !seat.player, active: seat.player?.currentTurn, mine: seat.player?.id === playerId, 'all-in': seat.player?.status === 'ALL_IN' }]">
           <template v-if="seat.player">
+            <Transition name="voice-pop">
+              <div v-if="activeEmote?.playerId === seat.player.id" class="voice-bubble">
+                <span>{{ VOICE_EMOTES.find(item => item.id === activeEmote.emoteId)?.icon || '💬' }}</span>
+                {{ activeEmote.text }}
+              </div>
+            </Transition>
             <div class="hole-cards">
               <PlayingCard v-for="(card, index) in seat.player.cards" :key="index" :value="card" small />
             </div>
@@ -162,14 +286,17 @@ onBeforeUnmount(clearAutoTimer)
         <span>桌上 <strong>{{ me.chips }}</strong></span>
         <span>备用 <strong>{{ me.reserveChips }}</strong></span>
         <span>当前总计 <strong>{{ me.totalChips }}</strong></span>
+        <span v-if="me.chips < table.minBuyIn" class="bankroll-warning">需要补码</span>
+        <button class="chip-manager-toggle" type="button" :aria-expanded="chipManagerOpen"
+          @click="chipManagerOpen = !chipManagerOpen">{{ chipManagerOpen ? '收起' : '管理筹码' }}</button>
       </div>
-      <div class="bankroll-actions">
+      <div v-if="chipManagerOpen" class="bankroll-actions">
         <label>调整金额<input v-model.number="chipAmount" type="number" min="1" :step="table.bigBlind" /></label>
         <button :disabled="busy || !canTopUp" @click="transfer('TOP_UP')">补码</button>
         <button :disabled="busy || !canCashOut" @click="transfer('CASH_OUT')">回收</button>
         <button class="cash-all" :disabled="busy || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
       </div>
-      <small>只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
+      <small v-if="chipManagerOpen">只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
       <small v-if="table.privateTable && me.chips < table.minBuyIn" class="top-up-reminder">桌上筹码低于最低带入 {{ table.minBuyIn }}，自动下一局已暂停；补码后会自动恢复。</small>
     </section>
 
@@ -187,14 +314,14 @@ onBeforeUnmount(clearAutoTimer)
         <small v-else-if="!canStart">等待其他玩家行动</small>
         <small v-else>至少两人即可开始下一局</small>
       </div>
-      <div v-if="myTurn" class="actions">
-        <button class="danger" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy" @click="act('FOLD')">弃牌</button>
-        <button v-if="callAmount === 0" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy" @click="act('CHECK')">过牌</button>
-        <button v-else :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
+      <div v-if="myTurn" class="actions" aria-label="牌局操作">
+        <button class="danger action-fold" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy" @click="act('FOLD')">弃牌</button>
+        <button v-if="callAmount === 0" class="action-call" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy" @click="act('CHECK')">过牌</button>
+        <button v-else class="action-call" :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
         <div v-if="quickRaises.length" class="quick-raises">
           <button v-for="option in quickRaises" :key="option.amount" :class="{ recommended: option.label === '建议' }" :disabled="busy" @click="quickRaise(option.amount)">{{ option.label }} <strong>{{ option.amount }}</strong></button>
         </div>
-        <button class="custom-raise-toggle" type="button" :class="{ active: customRaiseExpanded }" @click="customRaiseExpanded = !customRaiseExpanded">{{ customRaiseExpanded ? '收起自定义' : '自定义加注' }}</button>
+        <button class="custom-raise-toggle action-raise" type="button" :class="{ active: customRaiseExpanded }" @click="customRaiseExpanded = !customRaiseExpanded">{{ customRaiseExpanded ? '收起自定义' : '自定义加注' }}</button>
         <button v-if="callAmount < me.chips" class="all-in-button" :class="{ recommended: advice?.recommendedAction === 'ALL_IN' }" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
         <template v-if="customRaiseExpanded">
           <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
@@ -207,12 +334,22 @@ onBeforeUnmount(clearAutoTimer)
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
       </div>
     </section>
+    <aside class="voice-emote-dock" :class="{ expanded: voiceTrayOpen }">
+      <Transition name="voice-tray">
+        <div v-if="voiceTrayOpen" class="voice-emote-list">
+          <button v-for="item in VOICE_EMOTES" :key="item.id" type="button"
+            @click="sendVoiceEmote(item.id)"><span>{{ item.icon }}</span>{{ item.label }}</button>
+        </div>
+      </Transition>
+      <button class="voice-emote-trigger" type="button" :aria-expanded="voiceTrayOpen"
+        @click="toggleVoiceTray"><span>🎙</span>{{ voiceTrayOpen ? '收起' : '语音表情' }}</button>
+    </aside>
     <p class="mvp-note">规则：2–6 人、盲注 {{ table.smallBlind }}/{{ table.bigBlind }}、带入 {{ table.minBuyIn }}–{{ table.maxBuyIn }}；支持补码、回收、全押、边池与断线身份恢复。</p>
 
     <section v-if="table.privateTable && !betweenHands" class="strategy-panel" :class="{ expanded: strategyExpanded }">
       <header>
         <div><p class="eyebrow">OPTIONAL STRATEGY</p><strong>胜率与近似 GTO 参考</strong></div>
-        <div class="strategy-head-actions"><span>需要时再查看</span><button type="button" :aria-expanded="strategyExpanded" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '展开查看' }}</button></div>
+        <div class="strategy-head-actions"><span>需要时再查看</span><button type="button" :aria-expanded="strategyExpanded" @click="strategyExpanded = !strategyExpanded">{{ strategyExpanded ? '收起' : '策略' }}</button></div>
       </header>
       <template v-if="strategyExpanded && advice?.available">
         <div class="strategy-metrics">

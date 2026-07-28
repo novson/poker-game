@@ -78,5 +78,11 @@ public class TableController {
                                         @Valid @RequestBody Requests.ChipCommand request) {
         return service.cashOut(tableId, request.playerId(), request.reconnectToken(), request.amount());
     }
+
+    @PostMapping("/{tableId}/emotes")
+    public TableViews.TableEvent emote(@PathVariable UUID tableId,
+                                       @Valid @RequestBody Requests.EmoteCommand request) {
+        return service.emote(tableId, request.playerId(), request.reconnectToken(), request.emoteId());
+    }
 }
 

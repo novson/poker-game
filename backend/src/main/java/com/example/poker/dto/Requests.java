@@ -25,6 +25,8 @@ public final class Requests {
     public record PlayerCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken) {}
     public record ChipCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken,
                               @Min(1) @Max(10_000_000) int amount) {}
+    public record EmoteCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken,
+                               @NotBlank @Size(max = 24) String emoteId) {}
     public record PlayerAction(@NotNull UUID playerId, @NotNull UUID reconnectToken,
                                @NotNull ActionType type, Integer raiseTo) {}
     public record UpdateSettings(
