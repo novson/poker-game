@@ -65,6 +65,11 @@ public final class TableViews {
                                  String recommendedAction, String actionLabel, Integer raiseTo,
                                  int foldPercent, int checkCallPercent, int raisePercent,
                                  String passiveLabel, String summary, String note) {}
-    public record TableEvent(UUID tableId, long version) {}
+    public record TableEvent(UUID tableId, long version, String type, UUID playerId,
+                             String nickname, String emoteId, String text) {
+        public TableEvent(UUID tableId, long version) {
+            this(tableId, version, "TABLE_UPDATED", null, null, null, null);
+        }
+    }
     public record ErrorView(String message, Instant timestamp) {}
 }

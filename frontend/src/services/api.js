@@ -37,6 +37,9 @@ export const api = {
   cashOut: (tableId, playerId, reconnectToken, amount) => request(`/api/tables/${tableId}/chips/cash-out`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, amount })
   }),
+  emote: (tableId, playerId, reconnectToken, emoteId) => request(`/api/tables/${tableId}/emotes`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, emoteId })
+  }),
   adminSettings: (token) => request('/api/admin/settings', {
     headers: { 'X-Admin-Token': token }
   }),

@@ -22,6 +22,7 @@ const joinBuyIns = ref({})
 const busy = ref(false)
 const error = ref('')
 const connected = ref(false)
+const emoteEvent = ref(null)
 const savedSession = ref(readPokerSession())
 const adminOpen = ref(false)
 const adminToken = ref(sessionStorage.getItem('poker.adminToken') || '')
@@ -165,7 +166,9 @@ async function loadAdvice() {
 
 function connect() {
   stopSocket?.()
-  stopSocket = watchTable(table.value.id, refresh, value => { connected.value = value })
+  stopSocket = watchTable(table.value.id, refresh, value => { connected.value = value }, event => {
+    emoteEvent.value = { ...event, receivedAt: Date.now() }
+  })
 }
 
 async function start() {
@@ -200,6 +203,14 @@ async function adjustChips(type, amount) {
   const latest = await run(() => method(table.value.id, playerId.value, reconnectToken.value,
     Number(amount)))
   if (latest) table.value = latest
+}
+
+async function sendEmote(emoteId) {
+  try {
+    await api.emote(table.value.id, playerId.value, reconnectToken.value, emoteId)
+  } catch (e) {
+    error.value = e.message
+  }
 }
 
 async function initialize() {
@@ -274,7 +285,9 @@ onBeforeUnmount(() => stopSocket?.())
 </script>
 
 <template>
-  <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice" :busy="busy" :connected="connected" @action="action" @chips="adjustChips" @start="start" @leave="leave" />
+  <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice"
+    :busy="busy" :connected="connected" :emote-event="emoteEvent"
+    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" />
   <main v-else class="lobby-shell">
     <nav class="brand">
       <span class="brand-mark">R</span><strong>RIVER ROOM</strong>
@@ -291,13 +304,31 @@ onBeforeUnmount(() => stopSocket?.())
         <p>创建一张私人牌桌，邀请朋友加入。无需注册，输入昵称即可开局。</p>
       </div>
       <form class="create-card" @submit.prevent="createTable">
-        <p class="form-index">01 / 创建牌桌</p>
-        <label>你的昵称<input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" required /></label>
-        <label>牌桌名称<input v-model="tableName" maxlength="30" required /></label>
-        <label>人数上限<select v-model.number="maxPlayers"><option v-for="n in [2,3,4,5,6]" :key="n" :value="n">{{ n }} 人桌</option></select></label>
-        <label>首次带入筹码<input v-model.number="buyIn" type="number" :min="tableSettings.minBuyIn" :max="tableSettings.maxBuyIn" :step="tableSettings.bigBlind" required /><small>允许 {{ tableSettings.minBuyIn }}–{{ tableSettings.maxBuyIn }}，本次总额度 {{ tableSettings.totalChips }}，盲注 {{ tableSettings.smallBlind }}/{{ tableSettings.bigBlind }}</small></label>
-        <label class="private-toggle"><input v-model="privateTable" type="checkbox" /><span><strong>私人 AI 牌桌</strong><small>不会显示在公开大厅，仅供你与 AI 对局</small></span></label>
-        <label v-if="privateTable">AI 选手数量<select v-model.number="aiPlayers"><option v-for="n in maxPlayers - 1" :key="n" :value="n">{{ n }} 位 AI</option></select></label>
+        <header class="create-card-head">
+          <div><p class="form-index">快速开桌</p><strong>设置好昵称即可入座</strong></div>
+          <span>{{ tableSettings.smallBlind }}/{{ tableSettings.bigBlind }} 盲注</span>
+        </header>
+        <label class="create-nickname">你的昵称<input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" required /></label>
+        <div class="create-mode" aria-label="牌桌模式">
+          <button type="button" :aria-pressed="!privateTable" :class="{ active: !privateTable }" @click="privateTable = false">
+            <strong>朋友牌桌</strong><small>创建后邀请朋友加入</small>
+          </button>
+          <button type="button" :aria-pressed="privateTable" :class="{ active: privateTable }" @click="privateTable = true">
+            <strong>AI 私人桌</strong><small>立即和 AI 开始对局</small>
+          </button>
+        </div>
+        <div class="create-essentials">
+          <label>人数<select v-model.number="maxPlayers"><option v-for="n in [2,3,4,5,6]" :key="n" :value="n">{{ n }} 人桌</option></select></label>
+          <label>带入筹码<input v-model.number="buyIn" type="number" :min="tableSettings.minBuyIn" :max="tableSettings.maxBuyIn" :step="tableSettings.bigBlind" required /></label>
+        </div>
+        <details class="create-advanced">
+          <summary><span>更多设置</span><small>牌桌名称、AI 数量与金额说明</small></summary>
+          <div class="create-advanced-body">
+            <label>牌桌名称<input v-model="tableName" maxlength="30" required /></label>
+            <label v-if="privateTable">AI 选手数量<select v-model.number="aiPlayers"><option v-for="n in maxPlayers - 1" :key="n" :value="n">{{ n }} 位 AI</option></select></label>
+            <p>允许带入 {{ tableSettings.minBuyIn }}–{{ tableSettings.maxBuyIn }}，本次总额度 {{ tableSettings.totalChips }}。</p>
+          </div>
+        </details>
         <button class="gold wide" :disabled="busy">{{ busy ? '正在创建…' : '创建并入座 →' }}</button>
       </form>
     </section>
