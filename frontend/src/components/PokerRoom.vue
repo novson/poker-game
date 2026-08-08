@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
 import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
   minimumRaiseTo, quickRaiseTo, validRaise } from '../services/rules'
+import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
 import { seatsFromViewer } from '../services/tableView'
 
 const props = defineProps({
@@ -29,11 +30,20 @@ const soundPanelOpen = ref(false)
 const voiceTrayOpen = ref(false)
 const musicEnabled = ref(savedAudio.musicEnabled)
 const voiceEnabled = ref(savedAudio.voiceEnabled)
+const effectsEnabled = ref(savedAudio.effectsEnabled)
 const audioVolume = ref(savedAudio.volume)
 const musicStatus = ref(savedAudio.musicEnabled ? '点击页面后开始播放' : '')
 const activeEmote = ref(null)
+const actionNow = ref(Date.now())
+const chipFlights = ref([])
 let autoTimer
 let emoteTimer
+let clockTimer
+let flightSequence = 0
+let previousHandNumber = props.table.handNumber
+let previousBets = new Map()
+let betsInitialized = false
+const flightTimers = new Set()
 
 const me = computed(() => props.table.players.find(player => player.id === props.playerId))
 const myTurn = computed(() => me.value?.currentTurn)
@@ -52,6 +62,13 @@ const canCashOut = computed(() => {
     && (remaining === 0 || remaining >= props.table.minBuyIn)
 })
 const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value))
+const actionClock = computed(() => turnClock(
+  props.table.actionDeadline,
+  props.table.actionTimeSeconds,
+  actionNow.value
+))
+const winningCards = computed(() => winningCardState(props.table))
+const showdownHighlight = computed(() => props.table.phase === 'SHOWDOWN' && winningCards.value.active)
 const quickRaises = computed(() => {
   const options = [
     { label: '½ 池', amount: quickRaiseTo(props.table, me.value, 0.5) },
@@ -67,6 +84,40 @@ const quickRaises = computed(() => {
 })
 
 watch(minRaiseTo, value => { raiseTo.value = value }, { immediate: true })
+watch(() => ({
+  handNumber: props.table.handNumber,
+  players: props.table.players.map(player => ({
+    id: player.id,
+    handBet: player.handBet
+  }))
+}), snapshot => {
+  if (!betsInitialized) {
+    previousBets = new Map(snapshot.players.map(player => [player.id, Number(player.handBet) || 0]))
+    previousHandNumber = snapshot.handNumber
+    betsInitialized = true
+    return
+  }
+  const reset = snapshot.handNumber !== previousHandNumber
+  const result = collectBetFlights(previousBets, snapshot.players, reset)
+  previousBets = result.next
+  previousHandNumber = snapshot.handNumber
+  result.flights.forEach((flight, index) => {
+    const seat = seats.value.find(item => item.player?.id === flight.playerId)
+    if (!seat) return
+    const id = ++flightSequence
+    chipFlights.value.push({
+      ...flight,
+      id,
+      position: seat.position,
+      delay: index * 70
+    })
+    const timer = window.setTimeout(() => {
+      chipFlights.value = chipFlights.value.filter(item => item.id !== id)
+      flightTimers.delete(timer)
+    }, 1_050 + index * 70)
+    flightTimers.add(timer)
+  })
+}, { deep: true, immediate: true })
 watch([
   () => props.table.phase,
   () => me.value?.chips,
@@ -90,12 +141,17 @@ watch([autoNextEligible, autoNext, () => props.busy], ([eligible, enabled, busy]
   }, 1000)
 }, { immediate: true })
 watch(myTurn, value => {
-  if (value && navigator.vibrate) navigator.vibrate(70)
+  if (value && effectsEnabled.value && navigator.vibrate) navigator.vibrate(70)
   if (!value) customRaiseExpanded.value = false
   if (value) {
     soundPanelOpen.value = false
     voiceTrayOpen.value = false
   }
+})
+watch(() => actionClock.value.seconds, (seconds, previous) => {
+  if (!myTurn.value || !effectsEnabled.value || seconds === previous || seconds <= 0 || seconds > 5) return
+  pokerAudio.tick(seconds, audioVolume.value)
+  if (navigator.vibrate) navigator.vibrate(seconds <= 2 ? [35, 35, 35] : 24)
 })
 watch([betweenHands, () => me.value?.chips], ([between, chips]) => {
   if (!between) chipManagerOpen.value = false
@@ -136,7 +192,8 @@ function saveSoundSettings() {
   saveAudioPreferences({
     musicEnabled: musicEnabled.value,
     volume: audioVolume.value,
-    voiceEnabled: voiceEnabled.value
+    voiceEnabled: voiceEnabled.value,
+    effectsEnabled: effectsEnabled.value
   })
 }
 
@@ -146,10 +203,12 @@ function toggleSoundPanel() {
 }
 
 function unlockAudio() {
-  if (!musicEnabled.value) return
-  pokerAudio.startMusic(audioVolume.value).then(playing => {
-    musicStatus.value = playing ? '正在播放' : '播放被浏览器阻止，请再次点击'
-  })
+  pokerAudio.unlock(audioVolume.value)
+  if (musicEnabled.value) {
+    pokerAudio.startMusic(audioVolume.value).then(playing => {
+      musicStatus.value = playing ? '正在播放' : '播放被浏览器阻止，请再次点击'
+    })
+  }
 }
 
 async function toggleMusic() {
@@ -174,6 +233,11 @@ function toggleVoice() {
   if (!voiceEnabled.value) window.speechSynthesis?.cancel()
 }
 
+function toggleEffects() {
+  saveSoundSettings()
+  if (effectsEnabled.value) pokerAudio.tick(4, audioVolume.value)
+}
+
 function sendVoiceEmote(emoteId) {
   voiceTrayOpen.value = false
   emit('emote', emoteId)
@@ -192,9 +256,44 @@ function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
 
+function communityEffect(index) {
+  return boardMotion(index)
+}
+
+function communityHighlighted(card) {
+  return showdownHighlight.value && winningCards.value.community.has(card)
+}
+
+function communityMuted(card) {
+  return showdownHighlight.value && !winningCards.value.community.has(card)
+}
+
+function holeCardMotion(player, card) {
+  if (props.table.phase === 'SHOWDOWN' && card !== '??' && player.id !== props.playerId) return 'reveal'
+  return 'deal'
+}
+
+function holeCardHighlighted(player, card) {
+  return showdownHighlight.value && Boolean(player.winner)
+    && Boolean(winningCards.value.bestByPlayer.get(player.id)?.has(card))
+}
+
+function holeCardMuted(player, card) {
+  if (!showdownHighlight.value) return false
+  const best = winningCards.value.bestByPlayer.get(player.id)
+  return !player.winner || !best?.has(card)
+}
+
+onMounted(() => {
+  clockTimer = window.setInterval(() => { actionNow.value = Date.now() }, 200)
+})
+
 onBeforeUnmount(() => {
   clearAutoTimer()
   if (emoteTimer) window.clearTimeout(emoteTimer)
+  if (clockTimer) window.clearInterval(clockTimer)
+  flightTimers.forEach(timer => window.clearTimeout(timer))
+  flightTimers.clear()
   pokerAudio.destroy()
 })
 </script>
@@ -219,7 +318,7 @@ onBeforeUnmount(() => {
         <div class="connection" :class="{ online: connected }">
           <span></span>{{ connected ? '实时在线' : '正在重连' }}
         </div>
-        <button class="sound-settings-button" type="button" :class="{ active: musicEnabled || voiceEnabled }"
+        <button class="sound-settings-button" type="button" :class="{ active: musicEnabled || voiceEnabled || effectsEnabled }"
           :aria-expanded="soundPanelOpen" @click="toggleSoundPanel">♫ 声音</button>
       </div>
     </header>
@@ -238,6 +337,10 @@ onBeforeUnmount(() => {
         <span><strong>语音表情</strong><small>朗读牌桌玩家的快捷短语</small></span>
         <input v-model="voiceEnabled" type="checkbox" @change="toggleVoice" />
       </label>
+      <label class="sound-toggle">
+        <span><strong>行动提示</strong><small>最后 5 秒滴答音与轻震动</small></span>
+        <input v-model="effectsEnabled" type="checkbox" @change="toggleEffects" />
+      </label>
     </section>
 
     <section class="table-stage">
@@ -248,16 +351,36 @@ onBeforeUnmount(() => {
         </div>
         <div class="board">
           <div class="community-cards">
-            <PlayingCard v-for="(card, index) in table.communityCards" :key="index" :value="card" />
+            <PlayingCard v-for="(card, index) in table.communityCards"
+              :key="`${table.handNumber}-${card}-${index}`"
+              :value="card"
+              :motion="communityEffect(index).name"
+              :delay="communityEffect(index).delay"
+              :highlighted="communityHighlighted(card)"
+              :muted="communityMuted(card)" />
             <div v-for="index in 5 - table.communityCards.length" :key="`slot-${index}`" class="empty-card"></div>
           </div>
-          <div class="pot">底池 <strong>{{ table.pot }}</strong></div>
+          <div class="pot" :class="{ collecting: chipFlights.length }">底池 <strong>{{ table.pot }}</strong></div>
           <div v-if="table.pots?.length > 1" class="side-pots">
             <span v-for="(amount, index) in table.pots" :key="index">{{ index ? `边池 ${index}` : '主池' }} {{ amount }}</span>
           </div>
         </div>
 
-        <div v-for="seat in seats" :key="seat.actualSeat" class="seat" :class="[`seat-${seat.position}`, { empty: !seat.player, active: seat.player?.currentTurn, mine: seat.player?.id === playerId, 'all-in': seat.player?.status === 'ALL_IN' }]">
+        <div class="chip-flight-layer" aria-hidden="true">
+          <div v-for="flight in chipFlights" :key="flight.id"
+            class="chip-flight" :class="`chip-flight-${flight.position}`"
+            :style="{ '--flight-delay': `${flight.delay}ms` }">
+            <i></i><i></i><i></i><strong>+{{ flight.amount }}</strong>
+          </div>
+        </div>
+
+        <div v-for="seat in seats" :key="seat.actualSeat" class="seat" :class="[`seat-${seat.position}`, {
+          empty: !seat.player,
+          active: seat.player?.currentTurn,
+          mine: seat.player?.id === playerId,
+          winner: seat.player?.winner,
+          'all-in': seat.player?.status === 'ALL_IN'
+        }]">
           <template v-if="seat.player">
             <Transition name="voice-pop">
               <div v-if="activeEmote?.playerId === seat.player.id" class="voice-bubble">
@@ -266,11 +389,30 @@ onBeforeUnmount(() => {
               </div>
             </Transition>
             <div class="hole-cards">
-              <PlayingCard v-for="(card, index) in seat.player.cards" :key="index" :value="card" small />
+              <PlayingCard v-for="(card, index) in seat.player.cards"
+                :key="`${table.handNumber}-${seat.player.id}-${card}-${index}`"
+                :value="card"
+                :motion="holeCardMotion(seat.player, card)"
+                :delay="seat.position * 45 + index * 100"
+                :highlighted="holeCardHighlighted(seat.player, card)"
+                :muted="holeCardMuted(seat.player, card)"
+                small />
             </div>
             <div class="player-chip" :title="seat.player.status">
+              <div v-if="seat.player.currentTurn" class="action-clock"
+                :class="{ urgent: actionClock.urgent, expired: actionClock.seconds === 0 }"
+                role="timer"
+                :aria-label="`剩余行动时间 ${actionClock.seconds} 秒`">
+                <svg viewBox="0 0 40 40" aria-hidden="true">
+                  <circle class="clock-track" cx="20" cy="20" r="17" pathLength="100"></circle>
+                  <circle class="clock-progress" cx="20" cy="20" r="17" pathLength="100"
+                    :style="{ strokeDashoffset: 100 - actionClock.progress * 100 }"></circle>
+                </svg>
+                <strong>{{ actionClock.seconds || '!' }}</strong>
+              </div>
               <span v-if="seat.player.dealer" class="dealer">D</span>
               <span v-if="seat.player.ai" class="ai-badge">AI</span>
+              <span v-if="seat.player.winner" class="winner-badge">🏆 胜者</span>
               <strong class="player-name">{{ seat.player.nickname }}</strong>
               <small class="player-stack" :title="`桌外备用 ${seat.player.reserveChips}`"><span aria-hidden="true">◉</span>{{ seat.player.chips }}</small>
             </div>

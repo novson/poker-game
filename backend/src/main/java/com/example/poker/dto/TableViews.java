@@ -28,13 +28,14 @@ public final class TableViews {
     public record PlayerView(UUID id, String nickname, int seat, int chips, int reserveChips, int totalChips,
                              int streetBet, int handBet,
                              String status, boolean ai, boolean dealer, boolean currentTurn, boolean canRaise,
-                             List<String> cards) {}
+                             boolean winner, List<String> bestCards, List<String> cards) {}
 
     public record TableView(UUID id, String name, int maxPlayers, boolean privateTable,
                             int totalChips, int minBuyIn, int defaultBuyIn, int maxBuyIn,
                             int smallBlind, int bigBlind,
                             GamePhase phase, String phaseLabel, long handNumber, int pot, int currentBet,
-                            int minRaise, List<Integer> pots, String message,
+                            int minRaise, long actionDeadline, int actionTimeSeconds,
+                            List<Integer> pots, String message,
                             List<String> communityCards, List<PlayerView> players) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
@@ -47,13 +48,15 @@ public final class TableViews {
                         player.reserveChips(), player.totalChips(),
                         player.streetBet(), player.handBet(), player.status().name(),
                         player.ai(), player.seat() == table.dealerSeat(), player.seat() == table.currentTurnSeat(),
-                        player.raiseAllowed(), cards);
+                        player.raiseAllowed(), table.showdownWinner(player.id()),
+                        table.showdownBestCards(player.id()).stream().map(Card::toString).toList(), cards);
             }).toList();
             return new TableView(table.id(), table.name(), table.maxPlayers(), table.privateTable(),
                     table.totalChips(), table.minBuyIn(), table.defaultBuyIn(), table.maxBuyIn(),
                     table.smallBlind(), table.bigBlind(),
                     table.phase(), table.phase().label(), table.handNumber(), table.pot(), table.currentBet(),
-                    table.minRaise(), table.pots(), table.message(),
+                    table.minRaise(), table.actionDeadlineEpochMillis(), table.actionTimeSeconds(),
+                    table.pots(), table.message(),
                     table.communityCards().stream().map(Card::toString).toList(), playerViews);
         }
     }
