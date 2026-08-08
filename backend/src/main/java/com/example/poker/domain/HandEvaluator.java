@@ -10,21 +10,36 @@ public final class HandEvaluator {
     private HandEvaluator() {}
 
     public static HandValue bestOf(List<Card> cards) {
+        return bestHand(cards).value();
+    }
+
+    public static List<Card> bestFive(List<Card> cards) {
+        return bestHand(cards).cards();
+    }
+
+    private static BestHand bestHand(List<Card> cards) {
         if (cards.size() < 5 || cards.size() > 7) {
             throw new IllegalArgumentException("评估牌数必须为 5 到 7 张");
         }
         HandValue best = null;
+        List<Card> bestCards = null;
         for (int a = 0; a < cards.size() - 4; a++)
             for (int b = a + 1; b < cards.size() - 3; b++)
                 for (int c = b + 1; c < cards.size() - 2; c++)
                     for (int d = c + 1; d < cards.size() - 1; d++)
                         for (int e = d + 1; e < cards.size(); e++) {
-                            HandValue value = evaluateFive(List.of(
-                                    cards.get(a), cards.get(b), cards.get(c), cards.get(d), cards.get(e)));
-                            if (best == null || value.compareTo(best) > 0) best = value;
+                            List<Card> candidate = List.of(
+                                    cards.get(a), cards.get(b), cards.get(c), cards.get(d), cards.get(e));
+                            HandValue value = evaluateFive(candidate);
+                            if (best == null || value.compareTo(best) > 0) {
+                                best = value;
+                                bestCards = candidate;
+                            }
                         }
-        return best;
+        return new BestHand(best, List.copyOf(bestCards));
     }
+
+    private record BestHand(HandValue value, List<Card> cards) {}
 
     static HandValue evaluateFive(List<Card> cards) {
         List<Integer> ranks = cards.stream().map(card -> card.rank().value())
