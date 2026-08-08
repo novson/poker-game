@@ -4,12 +4,16 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
 public final class PokerTable {
+    private static final int ACTION_TIME_SECONDS = 25;
+
     private final UUID id;
     private final String name;
     private final int maxPlayers;
@@ -33,6 +37,9 @@ public final class PokerTable {
     private int minRaise;
     private long handNumber;
     private String message = "等待玩家加入";
+    private Instant turnStartedAt;
+    private final Set<UUID> showdownWinnerIds = new HashSet<>();
+    private final Map<UUID, List<Card>> showdownBestCards = new HashMap<>();
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
@@ -96,6 +103,14 @@ public final class PokerTable {
     public int minRaise() { return minRaise; }
     public long handNumber() { return handNumber; }
     public String message() { return message; }
+    public int actionTimeSeconds() { return ACTION_TIME_SECONDS; }
+    public long actionDeadlineEpochMillis() {
+        return turnStartedAt == null ? 0 : turnStartedAt.plusSeconds(ACTION_TIME_SECONDS).toEpochMilli();
+    }
+    public boolean showdownWinner(UUID playerId) { return showdownWinnerIds.contains(playerId); }
+    public List<Card> showdownBestCards(UUID playerId) {
+        return showdownBestCards.getOrDefault(playerId, List.of());
+    }
 
     public synchronized List<Integer> pots() {
         if (pot == 0) return List.of();
@@ -208,6 +223,8 @@ public final class PokerTable {
         pot = 0;
         currentBet = 0;
         minRaise = bigBlind;
+        showdownWinnerIds.clear();
+        showdownBestCards.clear();
         players.forEach(PlayerState::startHand);
         dealerSeat = nextActiveSeat(dealerSeat);
 
@@ -228,7 +245,7 @@ public final class PokerTable {
         message = "第 " + handNumber + " 局开始";
 
         if (bettingRoundComplete()) advanceStreet();
-        else currentTurnSeat = nextActionSeat(bigBlindSeat);
+        else setCurrentTurnSeat(nextActionSeat(bigBlindSeat));
     }
 
     public synchronized void act(UUID playerId, ActionType type, Integer raiseTo) {
@@ -259,7 +276,7 @@ public final class PokerTable {
             return;
         }
         if (bettingRoundComplete()) advanceStreet();
-        else currentTurnSeat = nextActionSeat(currentTurnSeat);
+        else setCurrentTurnSeat(nextActionSeat(currentTurnSeat));
     }
 
     private void handleCall(PlayerState player, int callAmount) {
@@ -329,7 +346,7 @@ public final class PokerTable {
         }
         dealNextStreet();
         if (activePlayers().size() < 2) runOutBoard();
-        else currentTurnSeat = nextActionSeat(dealerSeat);
+        else setCurrentTurnSeat(nextActionSeat(dealerSeat));
     }
 
     private void dealNextStreet() {
@@ -384,6 +401,10 @@ public final class PokerTable {
                 HandValue best = eligible.stream().map(values::get).max(HandValue::compareTo).orElseThrow();
                 List<PlayerState> winners = eligible.stream().filter(player -> values.get(player).compareTo(best) == 0).toList();
                 awardPot(winners, amount);
+                winners.forEach(player -> {
+                    showdownWinnerIds.add(player.id());
+                    showdownBestCards.computeIfAbsent(player.id(), ignored -> bestFive(player));
+                });
                 String label = potIndex == 0 ? "主池" : "边池 " + potIndex;
                 potIndex++;
                 String names = winners.stream().map(PlayerState::nickname).reduce((a, b) -> a + "、" + b).orElse("");
@@ -401,6 +422,12 @@ public final class PokerTable {
         return HandEvaluator.bestOf(seven);
     }
 
+    private List<Card> bestFive(PlayerState player) {
+        List<Card> seven = new ArrayList<>(communityCards);
+        seven.addAll(player.holeCards());
+        return HandEvaluator.bestFive(seven);
+    }
+
     private void awardPot(List<PlayerState> winners, int amount) {
         List<PlayerState> ordered = winners.stream().sorted(Comparator.comparingInt(player ->
                 Math.floorMod(player.seat() - dealerSeat - 1, maxPlayers))).toList();
@@ -412,15 +439,21 @@ public final class PokerTable {
 
     private void awardUncontested(PlayerState winner) {
         winner.win(pot);
+        showdownWinnerIds.add(winner.id());
         message = winner.nickname() + " 赢得 " + pot + "（其他玩家弃牌）";
         finishHand();
     }
 
     private void finishHand() {
         phase = GamePhase.SHOWDOWN;
-        currentTurnSeat = -1;
+        setCurrentTurnSeat(-1);
         currentBet = 0;
         pot = 0;
+    }
+
+    private void setCurrentTurnSeat(int seat) {
+        currentTurnSeat = seat;
+        turnStartedAt = seat < 0 ? null : Instant.now();
     }
 
     private void postBlind(PlayerState player, int blind) {
