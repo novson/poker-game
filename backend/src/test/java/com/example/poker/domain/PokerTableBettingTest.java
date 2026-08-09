@@ -37,6 +37,9 @@ class PokerTableBettingTest {
         assertThat(table.phase()).isEqualTo(GamePhase.SHOWDOWN);
         assertThat(table.pot()).isZero();
         assertThat(alice.chips() + bob.chips()).isEqualTo(4_000);
+        assertThat(table.players().stream().filter(player -> table.showdownWinner(player.id())).toList())
+                .isNotEmpty()
+                .allSatisfy(player -> assertThat(table.showdownBestCards(player.id())).hasSize(5));
     }
 
     @Test

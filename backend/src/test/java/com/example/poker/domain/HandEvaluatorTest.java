@@ -37,6 +37,20 @@ class HandEvaluatorTest {
         assertThat(fullHouse).isGreaterThan(flush);
     }
 
+    @Test
+    void returnsTheFiveCardsThatFormTheBestHand() {
+        Card ace = card(Rank.ACE, Suit.SPADES);
+        Card king = card(Rank.KING, Suit.SPADES);
+        Card queen = card(Rank.QUEEN, Suit.SPADES);
+        Card jack = card(Rank.JACK, Suit.SPADES);
+        Card ten = card(Rank.TEN, Suit.SPADES);
+        Card two = card(Rank.TWO, Suit.HEARTS);
+        Card three = card(Rank.THREE, Suit.CLUBS);
+
+        assertThat(HandEvaluator.bestFive(List.of(ace, king, queen, jack, ten, two, three)))
+                .containsExactly(ace, king, queen, jack, ten);
+    }
+
     private Card card(Rank rank, Suit suit) { return new Card(rank, suit); }
 }
 

@@ -10,6 +10,7 @@ export const VOICE_EMOTES = Object.freeze([
 const MUSIC_KEY = 'poker.audio.music'
 const VOLUME_KEY = 'poker.audio.volume'
 const VOICE_KEY = 'poker.audio.voice'
+const EFFECTS_KEY = 'poker.audio.effects'
 
 export function readAudioPreferences(storage = window.localStorage) {
   const storedVolume = storage.getItem(VOLUME_KEY)
@@ -17,7 +18,8 @@ export function readAudioPreferences(storage = window.localStorage) {
   return {
     musicEnabled: storage.getItem(MUSIC_KEY) === 'true',
     volume: storedVolume !== null && Number.isFinite(volume) && volume >= 0 && volume <= 100 ? volume : 32,
-    voiceEnabled: storage.getItem(VOICE_KEY) !== 'false'
+    voiceEnabled: storage.getItem(VOICE_KEY) !== 'false',
+    effectsEnabled: storage.getItem(EFFECTS_KEY) !== 'false'
   }
 }
 
@@ -25,6 +27,7 @@ export function saveAudioPreferences(preferences, storage = window.localStorage)
   storage.setItem(MUSIC_KEY, String(Boolean(preferences.musicEnabled)))
   storage.setItem(VOLUME_KEY, String(Math.max(0, Math.min(100, Number(preferences.volume) || 0))))
   storage.setItem(VOICE_KEY, String(Boolean(preferences.voiceEnabled)))
+  storage.setItem(EFFECTS_KEY, String(preferences.effectsEnabled !== false))
 }
 
 export function emoteById(id) {
@@ -114,6 +117,35 @@ export function createPokerAudio(environment = globalThis) {
     return pending
   }
 
+  async function unlock(volume = currentVolume) {
+    if (!ensureContext()) return false
+    setVolume(volume)
+    try {
+      if (context.state !== 'running') await context.resume()
+      return context.state === 'running'
+    } catch (_) {
+      return false
+    }
+  }
+
+  function tick(seconds = 5, volume = currentVolume) {
+    if (!context || context.state !== 'running' || Number(volume) <= 0) return false
+    setVolume(volume)
+    const startsAt = context.currentTime + 0.01
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = seconds <= 2 ? 'square' : 'sine'
+    oscillator.frequency.value = seconds <= 2 ? 1_080 : 820
+    gain.gain.setValueAtTime(0.0001, startsAt)
+    gain.gain.exponentialRampToValueAtTime(seconds <= 2 ? 0.16 : 0.1, startsAt + 0.008)
+    gain.gain.exponentialRampToValueAtTime(0.0001, startsAt + 0.09)
+    oscillator.connect(gain)
+    gain.connect(master)
+    oscillator.start(startsAt)
+    oscillator.stop(startsAt + 0.11)
+    return true
+  }
+
   function stopMusic() {
     musicWanted = false
     if (timer) environment.clearInterval(timer)
@@ -146,5 +178,5 @@ export function createPokerAudio(environment = globalThis) {
     master = null
   }
 
-  return { destroy, setVolume, speak, startMusic, stopMusic }
+  return { destroy, setVolume, speak, startMusic, stopMusic, tick, unlock }
 }

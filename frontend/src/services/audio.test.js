@@ -14,18 +14,25 @@ describe('poker audio preferences', () => {
     expect(readAudioPreferences(memoryStorage())).toEqual({
       musicEnabled: false,
       volume: 32,
-      voiceEnabled: true
+      voiceEnabled: true,
+      effectsEnabled: true
     })
   })
 
   it('persists settings and clamps volume', () => {
     const storage = memoryStorage()
-    saveAudioPreferences({ musicEnabled: true, volume: 150, voiceEnabled: false }, storage)
+    saveAudioPreferences({
+      musicEnabled: true,
+      volume: 150,
+      voiceEnabled: false,
+      effectsEnabled: false
+    }, storage)
 
     expect(readAudioPreferences(storage)).toEqual({
       musicEnabled: true,
       volume: 100,
-      voiceEnabled: false
+      voiceEnabled: false,
+      effectsEnabled: false
     })
   })
 
@@ -78,6 +85,47 @@ describe('poker audio preferences', () => {
     await expect(audio.startMusic(32)).resolves.toBe(true)
     expect(gains[0].target).toBeGreaterThan(0.15)
     expect(oscillators.filter(oscillator => oscillator.started)).toHaveLength(5)
+    audio.destroy()
+  })
+
+  it('plays a short urgent tick after audio has been unlocked', async () => {
+    const oscillators = []
+    class AudioContext {
+      constructor() {
+        this.state = 'suspended'
+        this.currentTime = 0
+        this.destination = {}
+      }
+      createGain() {
+        return {
+          gain: {
+            cancelScheduledValues() {},
+            setTargetAtTime() {},
+            setValueAtTime() {},
+            exponentialRampToValueAtTime() {}
+          },
+          connect() {}
+        }
+      }
+      createOscillator() {
+        const oscillator = {
+          frequency: {},
+          connect() {},
+          start() { oscillator.started = true },
+          stop() {}
+        }
+        oscillators.push(oscillator)
+        return oscillator
+      }
+      async resume() { this.state = 'running' }
+      close() { return Promise.resolve() }
+    }
+    const audio = createPokerAudio({ AudioContext })
+
+    await expect(audio.unlock(32)).resolves.toBe(true)
+    expect(audio.tick(2, 32)).toBe(true)
+    expect(oscillators).toHaveLength(1)
+    expect(oscillators[0].type).toBe('square')
     audio.destroy()
   })
 })
