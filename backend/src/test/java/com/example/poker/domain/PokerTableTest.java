@@ -18,6 +18,8 @@ class PokerTableTest {
         assertThat(table.pot()).isEqualTo(30);
         assertThat(table.players()).allMatch(player -> player.holeCards().size() == 2);
         assertThat(table.currentTurnSeat()).isEqualTo(table.dealerSeat());
+        assertThat(table.actionDeadlineEpochMillis()).isGreaterThan(System.currentTimeMillis());
+        assertThat(table.actionTimeSeconds()).isEqualTo(25);
     }
 
     @Test
@@ -41,5 +43,7 @@ class PokerTableTest {
         assertThat(table.phase()).isEqualTo(GamePhase.SHOWDOWN);
         assertThat(table.pot()).isZero();
         assertThat(bob.chips()).isEqualTo(2_010);
+        assertThat(table.actionDeadlineEpochMillis()).isZero();
+        assertThat(table.showdownWinner(bob.id())).isTrue();
     }
 }
