@@ -12,15 +12,23 @@ import java.util.UUID;
 public final class Requests {
     private Requests() {}
 
+    public record CreateAccount(@NotBlank @Size(max = 16) String nickname) {}
+    public record LoginAccount(@NotBlank @Size(max = 16) String nickname,
+                               @NotBlank String loginCode) {}
+
     public record CreateTable(
             @NotBlank @Size(max = 30) String tableName,
             @NotBlank @Size(max = 16) String nickname,
+            UUID accountId,
+            UUID accountToken,
             @Min(2) @Max(6) Integer maxPlayers,
             Boolean privateTable,
             @Min(0) @Max(5) Integer aiPlayers,
             @Min(1) @Max(10_000_000) Integer buyIn) {}
 
     public record JoinTable(@NotBlank @Size(max = 16) String nickname,
+                            UUID accountId,
+                            UUID accountToken,
                             @Min(1) @Max(10_000_000) Integer buyIn) {}
     public record PlayerCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken) {}
     public record ChipCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken,

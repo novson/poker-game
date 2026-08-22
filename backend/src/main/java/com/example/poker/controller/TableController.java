@@ -29,13 +29,13 @@ public class TableController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public TableViews.SessionView create(@Valid @RequestBody Requests.CreateTable request) {
-        return service.create(request.tableName(), request.nickname(), request.maxPlayers(),
-                request.privateTable(), request.aiPlayers(), request.buyIn());
+        return service.create(request.tableName(), request.nickname(), request.accountId(), request.accountToken(),
+                request.maxPlayers(), request.privateTable(), request.aiPlayers(), request.buyIn());
     }
 
     @PostMapping("/{tableId}/join")
     public TableViews.SessionView join(@PathVariable UUID tableId, @Valid @RequestBody Requests.JoinTable request) {
-        return service.join(tableId, request.nickname(), request.buyIn());
+        return service.join(tableId, request.nickname(), request.accountId(), request.accountToken(), request.buyIn());
     }
 
     @GetMapping("/{tableId}")

@@ -12,6 +12,25 @@ import java.util.Random;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PokerAiStrategyTest {
+
+    @Test
+    void returnsCertainEquityWhenNoOpponentRemains() {
+        PokerAiStrategy strategy = new PokerAiStrategy(new java.util.Random(7), 100);
+        double equity = strategy.estimateEquity(
+                List.of(card(Rank.ACE, Suit.SPADES), card(Rank.KING, Suit.SPADES)), List.of(), 0);
+        assertThat(equity).isEqualTo(1.0);
+    }
+
+    @Test
+    void splitsEquityExactlyWhenTheBoardForcesATie() {
+        PokerAiStrategy strategy = new PokerAiStrategy(new java.util.Random(11), 120);
+        List<Card> board = List.of(card(Rank.TEN, Suit.HEARTS), card(Rank.JACK, Suit.HEARTS),
+                card(Rank.QUEEN, Suit.HEARTS), card(Rank.KING, Suit.HEARTS),
+                card(Rank.ACE, Suit.HEARTS));
+        double equity = strategy.estimateEquity(
+                List.of(card(Rank.TWO, Suit.CLUBS), card(Rank.THREE, Suit.DIAMONDS)), board, 1);
+        assertThat(equity).isEqualTo(0.5);
+    }
     @Test
     void recognizesPremiumAndWeakStartingHands() {
         double aces = strategy(7).estimateEquity(

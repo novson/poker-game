@@ -496,7 +496,7 @@ onBeforeUnmount(() => {
       </header>
       <template v-if="strategyExpanded && advice?.available">
         <div class="strategy-metrics">
-          <div><small>预估胜率</small><strong>{{ percent(advice.equity) }}</strong></div>
+          <div><small>模拟摊牌胜率</small><strong>{{ percent(advice.equity) }}</strong></div>
           <div><small>底池赔率</small><strong>{{ percent(advice.potOdds) }}</strong></div>
           <div><small>胜率优势</small><strong :class="{ negative: advice.edge < 0 }">{{ advice.edge >= 0 ? '+' : '' }}{{ percent(advice.edge) }}</strong></div>
           <div class="strategy-action"><small>建议动作</small><strong>{{ advice.actionLabel }}</strong></div>

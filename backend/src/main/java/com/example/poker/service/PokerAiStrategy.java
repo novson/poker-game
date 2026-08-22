@@ -79,7 +79,8 @@ public final class PokerAiStrategy {
 
     double estimateEquity(List<Card> holeCards, List<Card> communityCards, int opponents) {
         if (holeCards.size() != 2) throw new IllegalArgumentException("AI 必须有两张手牌");
-        int rivalCount = Math.max(1, opponents);
+        if (opponents <= 0) return 1.0;
+        int rivalCount = opponents;
         List<Card> available = fullDeck();
         Set<Card> known = new HashSet<>(holeCards);
         known.addAll(communityCards);

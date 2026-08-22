@@ -40,6 +40,8 @@ public final class PokerTable {
     private Instant turnStartedAt;
     private final Set<UUID> showdownWinnerIds = new HashSet<>();
     private final Map<UUID, List<Card>> showdownBestCards = new HashMap<>();
+    private final Map<UUID, String> handResults = new HashMap<>();
+    private final Map<UUID, Integer> handStartingTotals = new HashMap<>();
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
@@ -111,6 +113,14 @@ public final class PokerTable {
     public List<Card> showdownBestCards(UUID playerId) {
         return showdownBestCards.getOrDefault(playerId, List.of());
     }
+    public int handStartingTotal(UUID playerId) {
+        PlayerState player = requirePlayer(playerId);
+        return handStartingTotals.getOrDefault(playerId, player.totalChips());
+    }
+    public String handResult(UUID playerId) {
+        requirePlayer(playerId);
+        return handResults.getOrDefault(playerId, "LOSS");
+    }
 
     public synchronized List<Integer> pots() {
         if (pot == 0) return List.of();
@@ -132,19 +142,26 @@ public final class PokerTable {
     }
 
     public synchronized PlayerState join(String nickname, Integer buyIn) {
-        PlayerState player = addPlayer(nickname, false, buyIn == null ? startingChips : buyIn);
+        PlayerState player = addPlayer(null, nickname, false, buyIn == null ? startingChips : buyIn, totalChips);
+        message = nickname + " 加入了牌桌";
+        return player;
+    }
+
+    public synchronized PlayerState join(UUID accountId, String nickname, Integer buyIn, int bankroll) {
+        int requestedBuyIn = buyIn == null ? startingChips : buyIn;
+        PlayerState player = addPlayer(accountId, nickname, false, requestedBuyIn, bankroll);
         message = nickname + " 加入了牌桌";
         return player;
     }
 
     public synchronized PlayerState joinAi(String nickname) {
         if (!privateTable) throw new IllegalStateException("只有私人牌桌可以加入 AI");
-        PlayerState player = addPlayer(nickname, true, startingChips);
+        PlayerState player = addPlayer(null, nickname, true, startingChips, totalChips);
         message = nickname + " 已就座";
         return player;
     }
 
-    private PlayerState addPlayer(String nickname, boolean ai, int buyIn) {
+    private PlayerState addPlayer(UUID accountId, String nickname, boolean ai, int buyIn, int bankroll) {
         if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
             throw new IllegalStateException("牌局进行中，暂不能加入");
         if (players.size() >= maxPlayers) throw new IllegalStateException("牌桌已满");
@@ -152,9 +169,9 @@ public final class PokerTable {
             throw new IllegalArgumentException("昵称已被使用");
         if (buyIn < minBuyIn || buyIn > maxBuyIn)
             throw new IllegalArgumentException("带入筹码必须在 " + minBuyIn + " 到 " + maxBuyIn + " 之间");
-        if (buyIn > totalChips) throw new IllegalArgumentException("带入筹码不能超过单次总筹码");
-        PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), nickname,
-                firstFreeSeat(), buyIn, totalChips - buyIn, ai);
+        if (bankroll < buyIn) throw new IllegalArgumentException("账号可用筹码不足");
+        PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), accountId, nickname,
+                firstFreeSeat(), buyIn, bankroll - buyIn, ai);
         players.add(player);
         players.sort(Comparator.comparingInt(PlayerState::seat));
         return player;
@@ -225,6 +242,9 @@ public final class PokerTable {
         minRaise = bigBlind;
         showdownWinnerIds.clear();
         showdownBestCards.clear();
+        handResults.clear();
+        handStartingTotals.clear();
+        players.forEach(player -> handStartingTotals.put(player.id(), player.totalChips()));
         players.forEach(PlayerState::startHand);
         dealerSeat = nextActiveSeat(dealerSeat);
 
@@ -404,6 +424,9 @@ public final class PokerTable {
                 winners.forEach(player -> {
                     showdownWinnerIds.add(player.id());
                     showdownBestCards.computeIfAbsent(player.id(), ignored -> bestFive(player));
+                    handResults.merge(player.id(), winners.size() == 1 ? "WIN" : "TIE",
+                            (previousResult, nextResult) -> "WIN".equals(previousResult)
+                                    || "WIN".equals(nextResult) ? "WIN" : "TIE");
                 });
                 String label = potIndex == 0 ? "主池" : "边池 " + potIndex;
                 potIndex++;
@@ -440,6 +463,7 @@ public final class PokerTable {
     private void awardUncontested(PlayerState winner) {
         winner.win(pot);
         showdownWinnerIds.add(winner.id());
+        handResults.put(winner.id(), "WIN");
         message = winner.nickname() + " 赢得 " + pot + "（其他玩家弃牌）";
         finishHand();
     }
