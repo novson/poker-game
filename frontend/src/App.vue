@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PokerRoom from './components/PokerRoom.vue'
 import { api } from './services/api'
+import { clearPokerAccount, readPokerAccount, savePokerAccount } from './services/account'
 import { clearPokerSession, readPokerSession, savePokerSession } from './services/session'
 import { watchTable } from './services/socket'
 
@@ -11,6 +12,13 @@ const advice = ref(null)
 const playerId = ref('')
 const reconnectToken = ref('')
 const nickname = ref(localStorage.getItem('poker.nickname') || '')
+const accountSession = ref(readPokerAccount())
+const accountProfile = ref(null)
+const accountOpen = ref(false)
+const accountMode = ref('CREATE')
+const loginCode = ref('')
+const codeCopied = ref(false)
+const historyFilter = ref('ALL')
 const tableName = ref('周末牌局')
 const maxPlayers = ref(6)
 const privateTable = ref(false)
@@ -43,6 +51,14 @@ const settingsRatios = computed(() => {
     bankroll: Math.round((Number(adminSettings.value.totalChips) || 0) / bb)
   }
 })
+const activeHistory = computed(() => accountProfile.value?.recentHands?.filter(hand =>
+  historyFilter.value === 'ALL' || hand.mode === historyFilter.value) || [])
+const activeStats = computed(() => {
+  if (!accountProfile.value) return null
+  if (historyFilter.value === 'AI') return accountProfile.value.ai
+  if (historyFilter.value === 'HUMAN') return accountProfile.value.human
+  return accountProfile.value.overall
+})
 let stopSocket
 let adviceRequest = 0
 
@@ -73,6 +89,143 @@ async function run(task, showError = true) {
   busy.value = true
   error.value = ''
   try { return await task() } catch (e) { if (showError) error.value = e.message } finally { busy.value = false }
+}
+
+async function loadAccountProfile(silent = false) {
+  if (!accountSession.value) return null
+  try {
+    const profile = await api.accountProfile(accountSession.value.accountId,
+      accountSession.value.accountToken)
+    accountProfile.value = profile
+    nickname.value = profile.nickname
+    localStorage.setItem('poker.nickname', profile.nickname)
+    return profile
+  } catch (e) {
+    if ([400, 404].includes(e.status)) {
+      clearPokerAccount()
+      accountSession.value = null
+      accountProfile.value = null
+    }
+    if (!silent) error.value = e.message
+    return null
+  }
+}
+
+async function ensureAccount() {
+  if (accountSession.value) {
+    const profile = accountProfile.value || await loadAccountProfile()
+    return profile ? accountSession.value : null
+  }
+  const name = nickname.value.trim()
+  if (!name) {
+    error.value = '请先输入昵称'
+    return null
+  }
+  const created = await run(() => api.createAccount(name))
+  if (!created) return null
+  accountSession.value = savePokerAccount(created)
+  accountProfile.value = created.profile
+  nickname.value = created.profile.nickname
+  return accountSession.value
+}
+
+async function restoreAccountSeat(enterTable = false, silent = true) {
+  if (!accountSession.value) return false
+  let session
+  try {
+    session = await api.activeAccountSeat(accountSession.value.accountId,
+      accountSession.value.accountToken)
+  } catch (e) {
+    if (!silent) error.value = e.message
+    return false
+  }
+  if (!session?.table || !session?.playerId || !session?.reconnectToken) return false
+  if (enterTable) {
+    accountOpen.value = false
+    remember(session)
+  } else {
+    savedSession.value = savePokerSession({
+      tableId: session.table.id,
+      playerId: session.playerId,
+      reconnectToken: session.reconnectToken,
+      tableName: session.table.name,
+      nickname: accountProfile.value?.nickname || nickname.value,
+      autoResume: false
+    })
+  }
+  return true
+}
+
+async function createAccountFromPanel() {
+  const account = await ensureAccount()
+  if (account) accountOpen.value = true
+}
+
+async function loginAccountFromPanel() {
+  if (!nickname.value.trim() || !loginCode.value.trim()) {
+    error.value = '请输入昵称和跨设备登录码'
+    return
+  }
+  const session = await run(() => api.loginAccount(nickname.value.trim(), loginCode.value.trim()))
+  if (!session) return
+  accountSession.value = savePokerAccount(session)
+  accountProfile.value = session.profile
+  nickname.value = session.profile.nickname
+  loginCode.value = ''
+  localStorage.setItem('poker.nickname', nickname.value)
+  await restoreAccountSeat(true, false)
+}
+
+async function rotateLoginCode() {
+  if (!accountSession.value) return
+  if (accountSession.value.loginCode
+      && !window.confirm('生成新登录码后，旧登录码将不能再用于新设备登录。继续吗？')) return
+  const result = await run(() => api.rotateAccountLoginCode(accountSession.value.accountId,
+    accountSession.value.accountToken))
+  if (!result) return
+  accountSession.value = savePokerAccount({ ...accountSession.value, loginCode: result.loginCode })
+  codeCopied.value = false
+}
+
+async function copyLoginCode() {
+  if (!accountSession.value?.loginCode) return
+  try {
+    await navigator.clipboard.writeText(accountSession.value.loginCode)
+    codeCopied.value = true
+    window.setTimeout(() => { codeCopied.value = false }, 1800)
+  } catch (_) {
+    error.value = '复制失败，请长按登录码手动复制'
+  }
+}
+
+function switchAccount() {
+  if (!window.confirm('退出当前设备上的账号并切换其他账号？服务器中的筹码和战绩不会删除。')) return
+  clearPokerAccount()
+  clearPokerSession()
+  accountSession.value = null
+  accountProfile.value = null
+  savedSession.value = null
+  nickname.value = ''
+  loginCode.value = ''
+  accountMode.value = 'LOGIN'
+  localStorage.removeItem('poker.nickname')
+}
+
+function percent(value) {
+  return `${Math.round((Number(value) || 0) * 100)}%`
+}
+
+function handResultLabel(result) {
+  return result === 'WIN' ? '获胜' : result === 'TIE' ? '平局' : '失利'
+}
+
+function handModeLabel(mode) {
+  return mode === 'AI' ? '人机' : '人人'
+}
+
+function shortDate(value) {
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric',
+    hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
 function remember(session) {
@@ -122,9 +275,17 @@ async function resumeSession(silent = false) {
 
 async function createTable() {
   if (!nickname.value.trim() || !tableName.value.trim()) return
+  const account = await ensureAccount()
+  if (!account) return
+  if (await restoreAccountSeat(true)) {
+    error.value = '已恢复该账号保留的牌局'
+    return
+  }
   const session = await run(() => api.createTable({
     tableName: tableName.value,
     nickname: nickname.value,
+    accountId: account.accountId,
+    accountToken: account.accountToken,
     maxPlayers: maxPlayers.value,
     privateTable: privateTable.value,
     aiPlayers: privateTable.value ? aiPlayers.value : 0,
@@ -135,8 +296,14 @@ async function createTable() {
 
 async function join(item) {
   if (!nickname.value.trim()) { error.value = '请先输入昵称'; return }
+  const account = await ensureAccount()
+  if (!account) return
+  if (await restoreAccountSeat(true)) {
+    error.value = '已恢复该账号保留的牌局'
+    return
+  }
   const session = await run(() => api.joinTable(item.id, nickname.value,
-    Number(joinBuyIns.value[item.id] ?? item.defaultBuyIn)))
+    Number(joinBuyIns.value[item.id] ?? item.defaultBuyIn), account))
   if (session) remember(session)
 }
 
@@ -146,6 +313,7 @@ async function refresh() {
   if (latest) {
     table.value = latest
     loadAdvice()
+    if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
   }
 }
 
@@ -176,6 +344,7 @@ async function start() {
   if (latest) {
     table.value = latest
     loadAdvice()
+    if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
   }
 }
 
@@ -185,6 +354,7 @@ async function action(payload) {
   if (latest) {
     table.value = latest
     loadAdvice()
+    if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
   }
 }
 
@@ -202,7 +372,10 @@ async function adjustChips(type, amount) {
   const method = type === 'TOP_UP' ? api.topUp : api.cashOut
   const latest = await run(() => method(table.value.id, playerId.value, reconnectToken.value,
     Number(amount)))
-  if (latest) table.value = latest
+  if (latest) {
+    table.value = latest
+    loadAccountProfile(true)
+  }
 }
 
 async function sendEmote(emoteId) {
@@ -214,8 +387,10 @@ async function sendEmote(emoteId) {
 }
 
 async function initialize() {
-  await Promise.all([loadSettings(), loadTables()])
+  await Promise.all([loadSettings(), loadTables(), loadAccountProfile(true)])
   if (savedSession.value?.autoResume) await resumeSession(true)
+  if (!table.value && !savedSession.value && accountSession.value)
+    await restoreAccountSeat(false)
 }
 
 async function openAdmin() {
@@ -297,6 +472,10 @@ onBeforeUnmount(() => stopSocket?.())
       <div class="brand-actions">
         <span class="brand-live"><i></i>实时牌局</span>
         <a class="lobby-link" href="#open-tables">公开牌桌</a>
+        <button class="account-link" type="button" @click="accountOpen = true">
+          <span>{{ accountProfile?.nickname || '我的账号' }}</span>
+          <small v-if="accountProfile">{{ accountProfile.chips }} 筹码</small>
+        </button>
         <button class="admin-link" type="button" @click="openAdmin">管理</button>
       </div>
     </nav>
@@ -308,7 +487,7 @@ onBeforeUnmount(() => stopSocket?.())
       <div class="hero-copy">
         <p class="eyebrow">PRIVATE TABLES · REAL-TIME HOLDEM</p>
         <h1>今晚，<br /><em>河牌见。</em></h1>
-        <p>为认真牌局打造的实时德州扑克空间。无需注册，朋友同桌或随时挑战 AI，座位与筹码自动保留。</p>
+        <p>为认真牌局打造的实时德州扑克空间。无密码账号自动保存，朋友同桌或随时挑战 AI，筹码与战绩长期保留。</p>
         <div class="hero-proof" aria-label="产品能力">
           <span><strong>2–6</strong><small>灵活桌型</small></span>
           <span><strong>Live</strong><small>实时同步</small></span>
@@ -320,7 +499,7 @@ onBeforeUnmount(() => stopSocket?.())
           <div><p class="form-index">QUICK SEAT</p><strong>创建你的牌桌</strong><small>约 10 秒即可入座</small></div>
           <span class="stakes-badge"><small>默认盲注</small>{{ tableSettings.smallBlind }}/{{ tableSettings.bigBlind }}</span>
         </header>
-        <label class="create-nickname"><span>玩家昵称</span><input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" required /></label>
+        <label class="create-nickname"><span>玩家昵称<small v-if="accountProfile">已绑定长期账号</small></span><input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" :disabled="!!accountProfile" required /></label>
         <div class="create-mode" aria-label="牌桌模式">
           <button type="button" :aria-pressed="!privateTable" :class="{ active: !privateTable }" @click="privateTable = false">
             <span class="mode-icon">♣</span><span><strong>朋友牌桌</strong><small>创建后邀请朋友加入</small></span>
@@ -395,6 +574,63 @@ onBeforeUnmount(() => stopSocket?.())
           </article>
         </div>
         <p v-else class="admin-empty">当前没有牌桌</p>
+      </template>
+    </section>
+  </div>
+  <div v-if="accountOpen" class="admin-overlay account-overlay" @click.self="accountOpen = false">
+    <section class="admin-panel account-panel">
+      <header>
+        <div><p class="eyebrow">PLAYER PROFILE</p><h2>我的账号与战绩</h2></div>
+        <button class="panel-close" type="button" @click="accountOpen = false">×</button>
+      </header>
+      <div v-if="!accountProfile" class="account-create">
+        <span class="account-suit">♠</span>
+        <strong>{{ accountMode === 'CREATE' ? '创建长期账号' : '登录已有账号' }}</strong>
+        <p>{{ accountMode === 'CREATE' ? '创建后会获得跨设备登录码，筹码余额和每手战绩保存在服务器。' : '输入同一昵称和登录码，即可在手机、电脑间共享筹码与战绩。' }}</p>
+        <div class="account-mode-tabs">
+          <button type="button" :class="{ active: accountMode === 'CREATE' }" @click="accountMode = 'CREATE'">创建账号</button>
+          <button type="button" :class="{ active: accountMode === 'LOGIN' }" @click="accountMode = 'LOGIN'">已有账号登录</button>
+        </div>
+        <label>玩家昵称<input v-model="nickname" maxlength="16" placeholder="输入账号昵称" /></label>
+        <label v-if="accountMode === 'LOGIN'">跨设备登录码<input v-model="loginCode" autocomplete="one-time-code" placeholder="输入跨设备登录码" @keyup.enter="loginAccountFromPanel" /></label>
+        <button v-if="accountMode === 'CREATE'" class="gold wide" type="button" :disabled="busy" @click="createAccountFromPanel">创建账号</button>
+        <button v-else class="gold wide" type="button" :disabled="busy" @click="loginAccountFromPanel">登录并保存到本机</button>
+        <small>登录码相当于账号恢复凭证，请勿发给其他人。各设备登录后都会自动保持登录。</small>
+      </div>
+      <template v-else>
+        <div class="account-summary">
+          <div><span class="account-avatar">{{ accountProfile.nickname.slice(0, 1).toUpperCase() }}</span><span><strong>{{ accountProfile.nickname }}</strong><small>无密码账号 · 本机身份已保存</small></span></div>
+          <span class="account-bankroll"><small>长期筹码</small><strong>{{ accountProfile.chips }}</strong><button type="button" @click="switchAccount">切换账号</button></span>
+        </div>
+        <section class="account-login-code">
+          <div><strong>跨设备登录</strong><small>在手机或其他电脑选择“已有账号登录”，输入昵称和此登录码。</small></div>
+          <template v-if="accountSession?.loginCode">
+            <code>{{ accountSession.loginCode }}</code>
+            <button type="button" @click="copyLoginCode">{{ codeCopied ? '已复制' : '复制' }}</button>
+            <button class="rotate-code" type="button" :disabled="busy" @click="rotateLoginCode">更换</button>
+          </template>
+          <button v-else class="generate-code" type="button" :disabled="busy" @click="rotateLoginCode">生成跨设备登录码</button>
+        </section>
+        <div class="history-tabs" role="tablist" aria-label="战绩类型">
+          <button v-for="item in [{ key: 'ALL', label: '全部' }, { key: 'AI', label: '人机' }, { key: 'HUMAN', label: '人人' }]"
+            :key="item.key" type="button" :class="{ active: historyFilter === item.key }" @click="historyFilter = item.key">{{ item.label }}</button>
+          <button class="history-refresh" type="button" :disabled="busy" @click="loadAccountProfile()">刷新</button>
+        </div>
+        <div v-if="activeStats" class="account-stats">
+          <span><small>总手数</small><strong>{{ activeStats.hands }}</strong></span>
+          <span><small>胜率</small><strong>{{ percent(activeStats.winRate) }}</strong></span>
+          <span><small>胜 / 平 / 负</small><strong>{{ activeStats.wins }} / {{ activeStats.ties }} / {{ activeStats.losses }}</strong></span>
+          <span><small>净筹码</small><strong :class="{ positive: activeStats.netChips > 0, negative: activeStats.netChips < 0 }">{{ activeStats.netChips > 0 ? '+' : '' }}{{ activeStats.netChips }}</strong></span>
+        </div>
+        <div class="history-heading"><strong>最近牌局</strong><small>按单手结算记录，平局不计入胜场</small></div>
+        <div v-if="activeHistory.length" class="history-list">
+          <article v-for="hand in activeHistory" :key="hand.id">
+            <span class="history-result" :class="hand.result.toLowerCase()">{{ handResultLabel(hand.result) }}</span>
+            <span class="history-table"><strong>{{ hand.tableName }}</strong><small>{{ handModeLabel(hand.mode) }} · 第 {{ hand.handNumber }} 局 · {{ shortDate(hand.playedAt) }}</small></span>
+            <span class="history-net" :class="{ positive: hand.netChips > 0, negative: hand.netChips < 0 }"><strong>{{ hand.netChips > 0 ? '+' : '' }}{{ hand.netChips }}</strong><small>余额 {{ hand.endingChips }}</small></span>
+          </article>
+        </div>
+        <p v-else class="history-empty">暂无{{ historyFilter === 'AI' ? '人机' : historyFilter === 'HUMAN' ? '人人' : '' }}战绩，完成一手牌后会自动记录。</p>
       </template>
     </section>
   </div>

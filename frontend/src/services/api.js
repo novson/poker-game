@@ -12,13 +12,29 @@ async function request(url, options = {}) {
 }
 
 export const api = {
+  createAccount: (nickname) => request('/api/accounts', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ nickname })
+  }),
+  loginAccount: (nickname, loginCode) => request('/api/accounts/login', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ nickname, loginCode })
+  }),
+  accountProfile: (accountId, accountToken) => request(`/api/accounts/${accountId}`, {
+    headers: { 'X-Account-Token': accountToken }
+  }),
+  activeAccountSeat: (accountId, accountToken) => request(`/api/accounts/${accountId}/active-seat`, {
+    headers: { 'X-Account-Token': accountToken }
+  }),
+  rotateAccountLoginCode: (accountId, accountToken) => request(`/api/accounts/${accountId}/login-code`, {
+    method: 'POST', headers: { 'X-Account-Token': accountToken }
+  }),
   settings: () => request('/api/settings'),
   listTables: () => request('/api/tables'),
   createTable: (payload) => request('/api/tables', {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload)
   }),
-  joinTable: (tableId, nickname, buyIn) => request(`/api/tables/${tableId}/join`, {
-    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ nickname, buyIn })
+  joinTable: (tableId, nickname, buyIn, account) => request(`/api/tables/${tableId}/join`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ nickname, buyIn,
+      accountId: account?.accountId, accountToken: account?.accountToken })
   }),
   reconnect: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/reconnect`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })

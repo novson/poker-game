@@ -17,7 +17,8 @@ management:
         enabled: true
 
 poker:
-  allowed-origins: ${POKER_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:8088}
+  allowed-origins: ${POKER_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:8088,http://127.0.0.1:8088}
   admin-token: ${POKER_ADMIN_TOKEN:}
   settings-file: ${POKER_SETTINGS_FILE:}
+  accounts-file: ${POKER_ACCOUNTS_FILE:}
 

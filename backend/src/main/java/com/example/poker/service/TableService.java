@@ -6,6 +6,7 @@ import com.example.poker.domain.PlayerState;
 import com.example.poker.domain.PlayerStatus;
 import com.example.poker.domain.PokerTable;
 import com.example.poker.dto.TableViews;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -38,17 +40,28 @@ public class TableService {
     private final ConcurrentMap<UUID, Long> lastEmotes = new ConcurrentHashMap<>();
     private final SimpMessagingTemplate messaging;
     private final PokerSettings settings;
+    private final AccountService accounts;
     private final PokerAiStrategy aiStrategy = new PokerAiStrategy(new SecureRandom(), 260);
     private final PokerAdvisor advisor = new PokerAdvisor();
 
     @Autowired
-    public TableService(SimpMessagingTemplate messaging, PokerSettings settings) {
+    public TableService(SimpMessagingTemplate messaging, PokerSettings settings, AccountService accounts) {
         this.messaging = messaging;
         this.settings = settings;
+        this.accounts = accounts;
     }
 
     TableService(SimpMessagingTemplate messaging) {
-        this(messaging, new PokerSettings((java.nio.file.Path) null));
+        this(messaging, testSettings());
+    }
+
+    private TableService(SimpMessagingTemplate messaging, PokerSettings settings) {
+        this(messaging, settings, new AccountService(
+                new ObjectMapper().findAndRegisterModules(), settings, (java.nio.file.Path) null));
+    }
+
+    private static PokerSettings testSettings() {
+        return new PokerSettings((java.nio.file.Path) null);
     }
 
     public List<TableViews.TableSummary> list() {
@@ -71,6 +84,11 @@ public class TableService {
 
     public TableViews.SessionView create(String tableName, String nickname, Integer maxPlayers,
                                          Boolean privateTable, Integer aiPlayers, Integer buyIn) {
+        return create(tableName, nickname, null, null, maxPlayers, privateTable, aiPlayers, buyIn);
+    }
+
+    public TableViews.SessionView create(String tableName, String nickname, UUID accountId, UUID accountToken,
+                                         Integer maxPlayers, Boolean privateTable, Integer aiPlayers, Integer buyIn) {
         int seats = maxPlayers == null ? 6 : maxPlayers;
         boolean isPrivate = Boolean.TRUE.equals(privateTable);
         int aiCount = aiPlayers == null ? 0 : aiPlayers;
@@ -81,7 +99,14 @@ public class TableService {
         PokerTable table = new PokerTable(UUID.randomUUID(), tableName.trim(), seats,
                 values.totalChips(), values.minBuyIn(), values.defaultBuyIn(), values.maxBuyIn(),
                 values.smallBlind(), values.bigBlind(), isPrivate);
-        PlayerState player = table.join(nickname.trim(), buyIn);
+        PlayerState player;
+        if (accountId == null || accountToken == null) {
+            player = table.join(nickname.trim(), buyIn);
+        } else {
+            AccountService.StoredIdentity identity = accounts.identity(accountId, accountToken);
+            ensureAccountAvailable(identity.id());
+            player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
+        }
         for (int index = 0; index < aiCount; index++) table.joinAi(AI_NAMES.get(index));
         tables.put(table.id(), table);
         versions.put(table.id(), new AtomicLong());
@@ -94,9 +119,21 @@ public class TableService {
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname, Integer buyIn) {
+        return join(tableId, nickname, null, null, buyIn);
+    }
+
+    public TableViews.SessionView join(UUID tableId, String nickname, UUID accountId, UUID accountToken,
+                                       Integer buyIn) {
         PokerTable table = requireTable(tableId);
         if (table.privateTable()) throw new IllegalArgumentException("私人牌桌不能从大厅加入");
-        PlayerState player = table.join(nickname.trim(), buyIn);
+        PlayerState player;
+        if (accountId == null || accountToken == null) {
+            player = table.join(nickname.trim(), buyIn);
+        } else {
+            AccountService.StoredIdentity identity = accounts.identity(accountId, accountToken);
+            ensureAccountAvailable(identity.id());
+            player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
+        }
         publish(tableId);
         return session(table, player);
     }
@@ -104,6 +141,15 @@ public class TableService {
     public TableViews.SessionView reconnect(UUID tableId, UUID playerId, UUID reconnectToken) {
         PokerTable table = requireTable(tableId);
         return session(table, table.authenticate(playerId, reconnectToken));
+    }
+
+    public Optional<TableViews.SessionView> accountSeat(UUID accountId, UUID accountToken) {
+        AccountService.StoredIdentity identity = accounts.identity(accountId, accountToken);
+        return sortedTables().stream()
+                .flatMap(table -> table.players().stream()
+                        .filter(player -> identity.id().equals(player.accountId()))
+                        .map(player -> session(table, player)))
+                .findFirst();
     }
 
     public TableViews.TableView get(UUID tableId, UUID playerId, UUID reconnectToken) {
@@ -127,6 +173,7 @@ public class TableService {
                 .filter(other -> other.status() == PlayerStatus.ACTIVE
                         || other.status() == PlayerStatus.ALL_IN)
                 .count();
+        if (opponents == 0) return unavailableAdvice();
         long seed = Objects.hash(table.id(), table.handNumber(), player.holeCards(), table.communityCards(),
                 table.pot(), table.currentBet(), player.streetBet(), opponents);
         int callAmount = table.callAmount(player.id());
@@ -146,6 +193,7 @@ public class TableService {
         table.authenticate(playerId, reconnectToken);
         table.start(playerId);
         runAiTurns(table);
+        synchronizeAccounts(table);
         publish(tableId);
         return TableViews.TableView.from(table, playerId);
     }
@@ -156,6 +204,7 @@ public class TableService {
         table.authenticate(playerId, reconnectToken);
         table.act(playerId, type, raiseTo);
         runAiTurns(table);
+        synchronizeAccounts(table);
         publish(tableId);
         return TableViews.TableView.from(table, playerId);
     }
@@ -172,6 +221,7 @@ public class TableService {
         PokerTable table = requireTable(tableId);
         table.authenticate(playerId, reconnectToken);
         table.topUp(playerId, amount);
+        synchronizeAccounts(table);
         publish(tableId);
         return TableViews.TableView.from(table, playerId);
     }
@@ -180,6 +230,7 @@ public class TableService {
         PokerTable table = requireTable(tableId);
         table.authenticate(playerId, reconnectToken);
         table.cashOut(playerId, amount);
+        synchronizeAccounts(table);
         publish(tableId);
         return TableViews.TableView.from(table, playerId);
     }
@@ -206,6 +257,7 @@ public class TableService {
 
     public void delete(UUID tableId) {
         PokerTable table = requireTable(tableId);
+        synchronizeAccounts(table);
         table.players().forEach(player -> lastEmotes.remove(player.id()));
         tables.remove(tableId);
         versions.remove(tableId);
@@ -233,6 +285,26 @@ public class TableService {
             table.act(ai.id(), decision.action(), decision.raiseTo());
         }
         throw new IllegalStateException("AI 行动次数异常，请重新开始牌局");
+    }
+
+    private void synchronizeAccounts(PokerTable table) {
+        for (PlayerState player : table.players()) {
+            if (player.ai() || player.accountId() == null) continue;
+            accounts.updateBalance(player.accountId(), player.totalChips());
+            if (table.phase() == GamePhase.SHOWDOWN && table.handNumber() > 0) {
+                int netChips = player.totalChips() - table.handStartingTotal(player.id());
+                accounts.recordHand(player.accountId(), new AccountService.HandResult(
+                        table.id(), table.name(), table.handNumber(),
+                        table.privateTable() ? "AI" : "HUMAN", table.handResult(player.id()),
+                        netChips, player.totalChips()));
+            }
+        }
+    }
+
+    private void ensureAccountAvailable(UUID accountId) {
+        boolean seated = tables.values().stream().flatMap(table -> table.players().stream())
+                .anyMatch(player -> accountId.equals(player.accountId()));
+        if (seated) throw new IllegalStateException("账号已有保留座位，请先继续原牌局");
     }
 
     private TableViews.SessionView session(PokerTable table, PlayerState player) {

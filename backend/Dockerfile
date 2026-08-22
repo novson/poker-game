@@ -8,6 +8,7 @@ RUN mvn -B verify
 FROM eclipse-temurin:17-jre-alpine
 RUN addgroup -S poker && adduser -S poker -G poker
 WORKDIR /app
+RUN mkdir -p /var/lib/poker && chown poker:poker /var/lib/poker
 COPY --from=build /workspace/target/poker-backend-1.0.0.jar app.jar
 USER poker
 EXPOSE 8080

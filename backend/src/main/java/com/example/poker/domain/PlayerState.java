@@ -7,6 +7,7 @@ import java.util.UUID;
 public final class PlayerState {
     private final UUID id;
     private final UUID reconnectToken;
+    private final UUID accountId;
     private final String nickname;
     private final int seat;
     private final boolean ai;
@@ -20,13 +21,19 @@ public final class PlayerState {
     private final List<Card> holeCards = new ArrayList<>(2);
 
     public PlayerState(UUID id, UUID reconnectToken, String nickname, int seat, int chips, boolean ai) {
-        this(id, reconnectToken, nickname, seat, chips, 0, ai);
+        this(id, reconnectToken, null, nickname, seat, chips, 0, ai);
     }
 
     public PlayerState(UUID id, UUID reconnectToken, String nickname, int seat, int chips,
                        int reserveChips, boolean ai) {
+        this(id, reconnectToken, null, nickname, seat, chips, reserveChips, ai);
+    }
+
+    public PlayerState(UUID id, UUID reconnectToken, UUID accountId, String nickname, int seat, int chips,
+                       int reserveChips, boolean ai) {
         this.id = id;
         this.reconnectToken = reconnectToken;
+        this.accountId = accountId;
         this.nickname = nickname;
         this.seat = seat;
         this.chips = chips;
@@ -36,6 +43,7 @@ public final class PlayerState {
 
     public UUID id() { return id; }
     public UUID reconnectToken() { return reconnectToken; }
+    public UUID accountId() { return accountId; }
     public String nickname() { return nickname; }
     public int seat() { return seat; }
     public boolean ai() { return ai; }
