@@ -309,9 +309,9 @@ onBeforeUnmount(() => {
     'custom-raise-open': myTurn && customRaiseExpanded
   }" @pointerdown="unlockAudio">
     <header class="room-header">
-      <button class="ghost-button" @click="emit('leave')">← 暂离牌桌</button>
-      <div>
-        <p class="eyebrow">{{ table.phaseLabel }} · 第 {{ table.handNumber || 0 }} 局</p>
+      <button class="ghost-button room-back" @click="emit('leave')"><span aria-hidden="true">←</span><span>暂离牌桌</span></button>
+      <div class="room-identity">
+        <div class="room-meta"><span>{{ table.phaseLabel }}</span><i></i><span>HAND {{ table.handNumber || 0 }}</span></div>
         <h1>{{ table.name }}</h1>
       </div>
       <div class="room-tools">
@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
           <span></span>{{ connected ? '实时在线' : '正在重连' }}
         </div>
         <button class="sound-settings-button" type="button" :class="{ active: musicEnabled || voiceEnabled || effectsEnabled }"
-          :aria-expanded="soundPanelOpen" @click="toggleSoundPanel">♫ 声音</button>
+          :aria-expanded="soundPanelOpen" aria-label="声音设置" @click="toggleSoundPanel"><span aria-hidden="true">♫</span><b>声音</b></button>
       </div>
     </header>
 
@@ -346,7 +346,7 @@ onBeforeUnmount(() => {
     <section class="table-stage">
       <div class="poker-table">
         <div class="felt-copy">
-          <span>RIVER ROOM</span>
+          <span><i>♠</i> RIVER ROOM <i>♦</i></span>
           <small>NO LIMIT · {{ table.smallBlind }}/{{ table.bigBlind }}</small>
         </div>
         <div class="board">
@@ -451,6 +451,7 @@ onBeforeUnmount(() => {
         <div class="turn-glance-numbers"><span>底池 <strong>{{ table.pot }}</strong></span><span>跟注 <strong>{{ callAmount }}</strong></span></div>
       </div>
       <div class="status-copy">
+        <span class="status-kicker">{{ myTurn ? 'YOUR ACTION' : betweenHands ? 'TABLE STATUS' : 'LIVE ACTION' }}</span>
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · 跟注额 {{ callAmount }}</small>
         <small v-else-if="!canStart">等待其他玩家行动</small>
@@ -484,7 +485,7 @@ onBeforeUnmount(() => {
         </div>
       </Transition>
       <button class="voice-emote-trigger" type="button" :aria-expanded="voiceTrayOpen"
-        @click="toggleVoiceTray"><span>🎙</span>{{ voiceTrayOpen ? '收起' : '语音表情' }}</button>
+        @click="toggleVoiceTray"><span>◉</span>{{ voiceTrayOpen ? '收起' : '牌桌互动' }}</button>
     </aside>
     <p class="mvp-note">规则：2–6 人、盲注 {{ table.smallBlind }}/{{ table.bigBlind }}、带入 {{ table.minBuyIn }}–{{ table.maxBuyIn }}；支持补码、回收、全押、边池与断线身份恢复。</p>
 
