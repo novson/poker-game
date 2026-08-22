@@ -290,8 +290,15 @@ onBeforeUnmount(() => stopSocket?.())
     @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" />
   <main v-else class="lobby-shell">
     <nav class="brand">
-      <span class="brand-mark">R</span><strong>RIVER ROOM</strong>
-      <div class="brand-actions"><small>实时德州扑克</small><a class="lobby-link" href="#open-tables">牌桌</a><button class="admin-link" type="button" @click="openAdmin">管理员</button></div>
+      <div class="brand-lockup">
+        <span class="brand-mark"><i>R</i></span>
+        <span class="brand-wordmark"><strong>RIVER ROOM</strong><small>Texas Hold'em Club</small></span>
+      </div>
+      <div class="brand-actions">
+        <span class="brand-live"><i></i>实时牌局</span>
+        <a class="lobby-link" href="#open-tables">公开牌桌</a>
+        <button class="admin-link" type="button" @click="openAdmin">管理</button>
+      </div>
     </nav>
     <article v-if="savedSession" class="resume-table resume-banner">
       <div><p class="eyebrow">YOUR SEAT IS SAVED</p><strong>{{ savedSession.tableName || '上次牌局' }}</strong><small>{{ savedSession.nickname || nickname }} · 座位与筹码已保留</small></div>
@@ -299,22 +306,27 @@ onBeforeUnmount(() => stopSocket?.())
     </article>
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">PRIVATE TABLES · REAL-TIME PLAY</p>
+        <p class="eyebrow">PRIVATE TABLES · REAL-TIME HOLDEM</p>
         <h1>今晚，<br /><em>河牌见。</em></h1>
-        <p>创建一张私人牌桌，邀请朋友加入。无需注册，输入昵称即可开局。</p>
+        <p>为认真牌局打造的实时德州扑克空间。无需注册，朋友同桌或随时挑战 AI，座位与筹码自动保留。</p>
+        <div class="hero-proof" aria-label="产品能力">
+          <span><strong>2–6</strong><small>灵活桌型</small></span>
+          <span><strong>Live</strong><small>实时同步</small></span>
+          <span><strong>NLH</strong><small>全押与边池</small></span>
+        </div>
       </div>
       <form class="create-card" @submit.prevent="createTable">
         <header class="create-card-head">
-          <div><p class="form-index">快速开桌</p><strong>设置好昵称即可入座</strong></div>
-          <span>{{ tableSettings.smallBlind }}/{{ tableSettings.bigBlind }} 盲注</span>
+          <div><p class="form-index">QUICK SEAT</p><strong>创建你的牌桌</strong><small>约 10 秒即可入座</small></div>
+          <span class="stakes-badge"><small>默认盲注</small>{{ tableSettings.smallBlind }}/{{ tableSettings.bigBlind }}</span>
         </header>
-        <label class="create-nickname">你的昵称<input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" required /></label>
+        <label class="create-nickname"><span>玩家昵称</span><input v-model="nickname" maxlength="16" placeholder="例如：RiverKing" required /></label>
         <div class="create-mode" aria-label="牌桌模式">
           <button type="button" :aria-pressed="!privateTable" :class="{ active: !privateTable }" @click="privateTable = false">
-            <strong>朋友牌桌</strong><small>创建后邀请朋友加入</small>
+            <span class="mode-icon">♣</span><span><strong>朋友牌桌</strong><small>创建后邀请朋友加入</small></span>
           </button>
           <button type="button" :aria-pressed="privateTable" :class="{ active: privateTable }" @click="privateTable = true">
-            <strong>AI 私人桌</strong><small>立即和 AI 开始对局</small>
+            <span class="mode-icon">♦</span><span><strong>AI 私人桌</strong><small>立即和 AI 开始对局</small></span>
           </button>
         </div>
         <div class="create-essentials">
@@ -329,21 +341,21 @@ onBeforeUnmount(() => stopSocket?.())
             <p>允许带入 {{ tableSettings.minBuyIn }}–{{ tableSettings.maxBuyIn }}，本次总额度 {{ tableSettings.totalChips }}。</p>
           </div>
         </details>
-        <button class="gold wide" :disabled="busy">{{ busy ? '正在创建…' : '创建并入座 →' }}</button>
+        <button class="gold wide create-submit" :disabled="busy"><span>{{ busy ? '正在创建…' : '创建并入座' }}</span><b aria-hidden="true">→</b></button>
       </form>
     </section>
 
     <section id="open-tables" class="tables-section">
-      <div class="section-title"><div><p class="eyebrow">OPEN TABLES</p><h2>公开牌桌</h2></div><button class="ghost-button" @click="loadTables">刷新</button></div>
+      <div class="section-title"><div><p class="eyebrow">OPEN TABLES</p><h2>正在开放的牌桌</h2><small>{{ tables.length ? `${tables.length} 张牌桌可查看` : '等待第一张牌桌' }}</small></div><button class="ghost-button" @click="loadTables"><span aria-hidden="true">↻</span> 刷新</button></div>
       <div v-if="tables.length" class="table-list">
         <article v-for="item in tables" :key="item.id" class="table-row">
-          <div><span class="phase-dot" :class="{ waiting: item.phase === 'WAITING' || item.phase === 'SHOWDOWN' }"></span><strong>{{ item.name }}</strong><small>{{ item.phaseLabel }}</small></div>
+          <div class="table-identity"><span class="table-monogram">R</span><span><strong>{{ item.name }}</strong><small><i class="phase-dot" :class="{ waiting: item.phase === 'WAITING' || item.phase === 'SHOWDOWN' }"></i>{{ item.phaseLabel }}</small></span></div>
           <span class="table-stakes"><strong>{{ item.smallBlind }}/{{ item.bigBlind }} · {{ item.playerCount }}/{{ item.maxPlayers }} 人</strong><small>总额度 {{ item.totalChips }}</small></span>
           <label class="row-buy-in">带入<input v-model.number="joinBuyIns[item.id]" type="number" :min="item.minBuyIn" :max="item.maxBuyIn" :step="item.bigBlind" :title="`允许 ${item.minBuyIn}–${item.maxBuyIn}`" /></label>
-          <button :disabled="busy || item.playerCount >= item.maxPlayers || !['WAITING','SHOWDOWN'].includes(item.phase)" @click="join(item)">加入牌桌</button>
+          <button :disabled="busy || item.playerCount >= item.maxPlayers || !['WAITING','SHOWDOWN'].includes(item.phase)" @click="join(item)">入座 <span aria-hidden="true">→</span></button>
         </article>
       </div>
-      <div v-else class="empty-lobby">还没有牌桌。成为今晚第一位庄家。</div>
+      <div v-else class="empty-lobby"><span>♠</span><strong>今晚的第一张牌桌，等你开局</strong><small>完成上方设置后即可立即入座</small></div>
     </section>
     <div v-if="error" class="toast" @click="error = ''">{{ error }} ×</div>
   </main>
