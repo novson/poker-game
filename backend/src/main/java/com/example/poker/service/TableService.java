@@ -5,13 +5,18 @@ import com.example.poker.domain.GamePhase;
 import com.example.poker.domain.PlayerState;
 import com.example.poker.domain.PlayerStatus;
 import com.example.poker.domain.PokerTable;
+import com.example.poker.domain.TableAccessException;
 import com.example.poker.dto.TableViews;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -20,10 +25,11 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
 @Service
 public class TableService {
+    private static final Logger log = LoggerFactory.getLogger(TableService.class);
     private static final List<String> AI_NAMES = List.of("AI·小河", "AI·阿福", "AI·梅花", "AI·红桃", "AI·黑桃");
     private static final Map<String, String> EMOTES = Map.of(
             "nice-hand", "打得不错",
@@ -36,7 +42,6 @@ public class TableService {
     private static final long EMOTE_COOLDOWN_NANOS = 1_200_000_000L;
 
     private final ConcurrentMap<UUID, PokerTable> tables = new ConcurrentHashMap<>();
-    private final ConcurrentMap<UUID, AtomicLong> versions = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, Long> lastEmotes = new ConcurrentHashMap<>();
     private final SimpMessagingTemplate messaging;
     private final PokerSettings settings;
@@ -66,11 +71,11 @@ public class TableService {
 
     public List<TableViews.TableSummary> list() {
         return sortedTables().stream().filter(table -> !table.privateTable())
-                .map(TableViews.TableSummary::from).toList();
+                .map(table -> table.access(() -> TableViews.TableSummary.from(table))).toList();
     }
 
     public List<TableViews.TableSummary> adminList() {
-        return sortedTables().stream().map(TableViews.TableSummary::from).toList();
+        return sortedTables().stream().map(table -> table.access(() -> TableViews.TableSummary.from(table))).toList();
     }
 
     private List<PokerTable> sortedTables() {
@@ -108,10 +113,11 @@ public class TableService {
             player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
         }
         for (int index = 0; index < aiCount; index++) table.joinAi(AI_NAMES.get(index));
-        tables.put(table.id(), table);
-        versions.put(table.id(), new AtomicLong());
-        publish(table.id());
-        return session(table, player);
+        return table.access(() -> {
+            tables.put(table.id(), table);
+            publish(table.id());
+            return session(table, player);
+        });
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname) {
@@ -124,89 +130,92 @@ public class TableService {
 
     public TableViews.SessionView join(UUID tableId, String nickname, UUID accountId, UUID accountToken,
                                        Integer buyIn) {
-        PokerTable table = requireTable(tableId);
-        if (table.privateTable()) throw new IllegalArgumentException("私人牌桌不能从大厅加入");
-        PlayerState player;
-        if (accountId == null || accountToken == null) {
-            player = table.join(nickname.trim(), buyIn);
-        } else {
-            AccountService.StoredIdentity identity = accounts.identity(accountId, accountToken);
-            ensureAccountAvailable(identity.id());
-            player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
-        }
-        publish(tableId);
-        return session(table, player);
+        AccountService.StoredIdentity identity = accountId == null || accountToken == null
+                ? null : accounts.identity(accountId, accountToken);
+        if (identity != null) ensureAccountAvailable(identity.id());
+        return withTable(tableId, table -> {
+            if (table.privateTable()) throw new IllegalArgumentException("私人牌桌不能从大厅加入");
+            PlayerState player;
+            if (accountId == null || accountToken == null) {
+                player = table.join(nickname.trim(), buyIn);
+            } else {
+                player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
+            }
+            publish(tableId);
+            return session(table, player);
+        });
     }
 
     public TableViews.SessionView reconnect(UUID tableId, UUID playerId, UUID reconnectToken) {
-        PokerTable table = requireTable(tableId);
-        return session(table, table.authenticate(playerId, reconnectToken));
+        return withTable(tableId, table -> {
+            return session(table, table.authenticate(playerId, reconnectToken));
+        });
     }
 
     public Optional<TableViews.SessionView> accountSeat(UUID accountId, UUID accountToken) {
         AccountService.StoredIdentity identity = accounts.identity(accountId, accountToken);
         return sortedTables().stream()
-                .flatMap(table -> table.players().stream()
+                .flatMap(table -> table.access(() -> table.players().stream()
                         .filter(player -> identity.id().equals(player.accountId()))
-                        .map(player -> session(table, player)))
+                        .map(player -> session(table, player)).toList()).stream())
                 .findFirst();
     }
 
     public TableViews.TableView get(UUID tableId, UUID playerId, UUID reconnectToken) {
-        PokerTable table = requireTable(tableId);
-        table.authenticate(playerId, reconnectToken);
-        return TableViews.TableView.from(table, playerId);
+        return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            return TableViews.TableView.from(table, playerId);
+        });
     }
 
     public TableViews.StrategyAdvice advice(UUID tableId, UUID playerId, UUID reconnectToken) {
-        PokerTable table = requireTable(tableId);
-        PlayerState player = table.authenticate(playerId, reconnectToken);
-        if (!table.privateTable()) throw new IllegalArgumentException("策略指引仅支持私人 AI 牌桌");
-        if (player.ai()) throw new IllegalArgumentException("AI 玩家不需要策略指引");
-        if (table.phase() == GamePhase.WAITING || table.phase() == GamePhase.SHOWDOWN
-                || player.holeCards().size() != 2) {
-            return unavailableAdvice();
-        }
+        return withTable(tableId, table -> {
+            PlayerState player = table.authenticate(playerId, reconnectToken);
+            if (!table.privateTable()) throw new IllegalArgumentException("策略指引仅支持私人 AI 牌桌");
+            if (player.ai()) throw new IllegalArgumentException("AI 玩家不需要策略指引");
+            if (table.phase() == GamePhase.WAITING || table.phase() == GamePhase.SHOWDOWN
+                    || player.holeCards().size() != 2) {
+                return unavailableAdvice();
+            }
 
-        int opponents = (int) table.players().stream()
-                .filter(other -> !other.id().equals(player.id()))
-                .filter(other -> other.status() == PlayerStatus.ACTIVE
-                        || other.status() == PlayerStatus.ALL_IN)
-                .count();
-        if (opponents == 0) return unavailableAdvice();
-        long seed = Objects.hash(table.id(), table.handNumber(), player.holeCards(), table.communityCards(),
-                table.pot(), table.currentBet(), player.streetBet(), opponents);
-        int callAmount = table.callAmount(player.id());
-        PokerAdvisor.Result result = advisor.advise(new PokerAdvisor.Context(
-                player.holeCards(), table.communityCards(), opponents, table.pot(), callAmount,
-                table.currentBet(), table.minRaise(), table.bigBlind(), player.chips(),
-                player.streetBet(), table.canRaise(player.id()), seed));
-        return new TableViews.StrategyAdvice(true, result.equity(), result.potOdds(), result.edge(),
-                result.action().name(), actionLabel(result.action(), result.raiseTo()), result.raiseTo(),
-                result.foldPercent(), result.checkCallPercent(), result.raisePercent(),
-                callAmount > 0 ? "跟注" : "过牌", result.summary(),
-                "基于随机范围模拟和底池赔率的近似 GTO 参考，不是完整求解器结果。");
+            int opponents = (int) table.players().stream()
+                    .filter(other -> !other.id().equals(player.id()))
+                    .filter(other -> other.status() == PlayerStatus.ACTIVE
+                            || other.status() == PlayerStatus.ALL_IN)
+                    .count();
+            if (opponents == 0) return unavailableAdvice();
+            long seed = Objects.hash(table.id(), table.handNumber(), player.holeCards(), table.communityCards(),
+                    table.pot(), table.currentBet(), player.streetBet(), opponents);
+            int callAmount = table.callAmount(player.id());
+            PokerAdvisor.Result result = advisor.advise(new PokerAdvisor.Context(
+                    player.holeCards(), table.communityCards(), opponents, table.pot(), callAmount,
+                    table.currentBet(), table.minRaise(), table.bigBlind(), player.chips(),
+                    player.streetBet(), table.canRaise(player.id()), seed));
+            return new TableViews.StrategyAdvice(true, result.equity(), result.potOdds(), result.edge(),
+                    result.action().name(), actionLabel(result.action(), result.raiseTo()), result.raiseTo(),
+                    result.foldPercent(), result.checkCallPercent(), result.raisePercent(),
+                    callAmount > 0 ? "跟注" : "过牌", result.summary(),
+                    "基于随机范围模拟和底池赔率的近似 GTO 参考，不是完整求解器结果。");
+        });
     }
 
     public TableViews.TableView start(UUID tableId, UUID playerId, UUID reconnectToken) {
-        PokerTable table = requireTable(tableId);
-        table.authenticate(playerId, reconnectToken);
-        table.start(playerId);
-        runAiTurns(table);
-        synchronizeAccounts(table);
-        publish(tableId);
-        return TableViews.TableView.from(table, playerId);
+        return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            table.start(playerId);
+            finishUpdate(table);
+            return TableViews.TableView.from(table, playerId);
+        });
     }
 
     public TableViews.TableView act(UUID tableId, UUID playerId, UUID reconnectToken,
                                     ActionType type, Integer raiseTo) {
-        PokerTable table = requireTable(tableId);
-        table.authenticate(playerId, reconnectToken);
-        table.act(playerId, type, raiseTo);
-        runAiTurns(table);
-        synchronizeAccounts(table);
-        publish(tableId);
-        return TableViews.TableView.from(table, playerId);
+        return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            table.act(playerId, type, raiseTo);
+            finishUpdate(table);
+            return TableViews.TableView.from(table, playerId);
+        });
     }
 
     public TableViews.AdminSettings settings() {
@@ -218,50 +227,99 @@ public class TableService {
     }
 
     public TableViews.TableView topUp(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {
-        PokerTable table = requireTable(tableId);
-        table.authenticate(playerId, reconnectToken);
-        table.topUp(playerId, amount);
-        synchronizeAccounts(table);
-        publish(tableId);
-        return TableViews.TableView.from(table, playerId);
+        return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            table.topUp(playerId, amount);
+            finishUpdate(table);
+            return TableViews.TableView.from(table, playerId);
+        });
     }
 
     public TableViews.TableView cashOut(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {
-        PokerTable table = requireTable(tableId);
-        table.authenticate(playerId, reconnectToken);
-        table.cashOut(playerId, amount);
-        synchronizeAccounts(table);
-        publish(tableId);
-        return TableViews.TableView.from(table, playerId);
+        return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            table.cashOut(playerId, amount);
+            finishUpdate(table);
+            return TableViews.TableView.from(table, playerId);
+        });
     }
 
     public TableViews.TableEvent emote(UUID tableId, UUID playerId, UUID reconnectToken, String emoteId) {
-        PokerTable table = requireTable(tableId);
-        PlayerState player = table.authenticate(playerId, reconnectToken);
-        String text = EMOTES.get(emoteId);
-        if (text == null) throw new IllegalArgumentException("不支持的语音表情");
+        return withTable(tableId, table -> {
+            PlayerState player = table.authenticate(playerId, reconnectToken);
+            String text = EMOTES.get(emoteId);
+            if (text == null) throw new IllegalArgumentException("不支持的语音表情");
 
-        long now = System.nanoTime();
-        Long previous = lastEmotes.put(playerId, now);
-        if (previous != null && now - previous < EMOTE_COOLDOWN_NANOS) {
-            lastEmotes.put(playerId, previous);
-            throw new IllegalArgumentException("语音表情发送太快，请稍后再试");
-        }
+            long now = System.nanoTime();
+            Long previous = lastEmotes.put(playerId, now);
+            if (previous != null && now - previous < EMOTE_COOLDOWN_NANOS) {
+                lastEmotes.put(playerId, previous);
+                throw new IllegalArgumentException("语音表情发送太快，请稍后再试");
+            }
 
-        long version = versions.computeIfAbsent(tableId, ignored -> new AtomicLong()).get();
-        TableViews.TableEvent event = new TableViews.TableEvent(
-                tableId, version, "EMOTE", player.id(), player.nickname(), emoteId, text);
-        messaging.convertAndSend("/topic/tables/" + tableId, event);
-        return event;
+            long version = table.version();
+            TableViews.TableEvent event = new TableViews.TableEvent(
+                    tableId, version, "EMOTE", player.id(), player.nickname(), emoteId, text);
+            messaging.convertAndSend("/topic/tables/" + tableId, event);
+            return event;
+        });
     }
 
     public void delete(UUID tableId) {
-        PokerTable table = requireTable(tableId);
+        withTable(tableId, table -> {
+            synchronizeAccounts(table);
+            table.players().forEach(player -> lastEmotes.remove(player.id()));
+            tables.remove(tableId);
+            messaging.convertAndSend("/topic/tables/" + tableId, new TableViews.TableEvent(tableId, -1));
+            return null;
+        });
+    }
+
+    public TableViews.LeaveView leave(UUID tableId, UUID playerId, UUID reconnectToken) {
+        return withTable(tableId, table -> {
+            table.requestLeave(playerId, reconnectToken);
+            finishUpdate(table);
+            boolean pending = table.players().stream().anyMatch(player -> player.id().equals(playerId));
+            return new TableViews.LeaveView(pending, pending ? TableViews.TableView.from(table, playerId) : null);
+        });
+    }
+
+    @Scheduled(fixedDelay = 500)
+    public void expireTurns() { expireTurns(Instant.now()); }
+
+    void expireTurns(Instant now) {
+        for (PokerTable table : tables.values()) {
+            try {
+                table.access(() -> {
+                    if (tables.get(table.id()) == table && table.expireTurn(now)) finishUpdate(table);
+                    return null;
+                });
+            } catch (RuntimeException exception) {
+                log.error("Failed to expire turn for table {}", table.id(), exception);
+            }
+        }
+    }
+
+    private void finishUpdate(PokerTable table) {
+        runAiTurns(table);
         synchronizeAccounts(table);
-        table.players().forEach(player -> lastEmotes.remove(player.id()));
-        tables.remove(tableId);
-        versions.remove(tableId);
-        messaging.convertAndSend("/topic/tables/" + tableId, new TableViews.TableEvent(tableId, -1));
+        table.removeLeavingPlayers().forEach(player -> lastEmotes.remove(player.id()));
+        if (table.players().stream().noneMatch(player -> !player.ai())) {
+            tables.remove(table.id(), table);
+            table.players().forEach(player -> lastEmotes.remove(player.id()));
+            messaging.convertAndSend("/topic/tables/" + table.id(), new TableViews.TableEvent(table.id(), -1));
+        } else {
+            publish(table.id());
+        }
+    }
+
+    private <T> T withTable(UUID tableId, Function<PokerTable, T> operation) {
+        PokerTable table = requireTable(tableId);
+        return table.access(() -> {
+            if (tables.get(tableId) != table)
+                throw new TableAccessException("TABLE_CLOSED", "牌桌已关闭，请选择其他牌桌");
+            return operation.apply(table);
+        });
     }
 
     private void runAiTurns(PokerTable table) {
@@ -291,7 +349,7 @@ public class TableService {
         for (PlayerState player : table.players()) {
             if (player.ai() || player.accountId() == null) continue;
             accounts.updateBalance(player.accountId(), player.totalChips());
-            if (table.phase() == GamePhase.SHOWDOWN && table.handNumber() > 0) {
+            if (table.phase() == GamePhase.SHOWDOWN && table.participatedInHand(player.id())) {
                 int netChips = player.totalChips() - table.handStartingTotal(player.id());
                 accounts.recordHand(player.accountId(), new AccountService.HandResult(
                         table.id(), table.name(), table.handNumber(),
@@ -302,7 +360,7 @@ public class TableService {
     }
 
     private void ensureAccountAvailable(UUID accountId) {
-        boolean seated = tables.values().stream().flatMap(table -> table.players().stream())
+        boolean seated = tables.values().stream().flatMap(table -> table.access(table::players).stream())
                 .anyMatch(player -> accountId.equals(player.accountId()));
         if (seated) throw new IllegalStateException("账号已有保留座位，请先继续原牌局");
     }
@@ -336,12 +394,14 @@ public class TableService {
 
     private PokerTable requireTable(UUID tableId) {
         PokerTable table = tables.get(tableId);
-        if (table == null) throw new IllegalArgumentException("牌桌不存在");
+        if (table == null) throw new TableAccessException("TABLE_CLOSED", "牌桌已关闭，请选择其他牌桌");
         return table;
     }
 
     private void publish(UUID tableId) {
-        long version = versions.computeIfAbsent(tableId, ignored -> new AtomicLong()).incrementAndGet();
+        PokerTable table = tables.get(tableId);
+        if (table == null) return;
+        long version = table.advanceVersion();
         messaging.convertAndSend("/topic/tables/" + tableId, new TableViews.TableEvent(tableId, version));
     }
 }

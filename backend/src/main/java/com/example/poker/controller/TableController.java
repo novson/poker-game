@@ -61,6 +61,12 @@ public class TableController {
         return service.start(tableId, request.playerId(), request.reconnectToken());
     }
 
+    @PostMapping("/{tableId}/leave")
+    public TableViews.LeaveView leave(@PathVariable UUID tableId,
+                                      @Valid @RequestBody Requests.PlayerCommand request) {
+        return service.leave(tableId, request.playerId(), request.reconnectToken());
+    }
+
     @PostMapping("/{tableId}/actions")
     public TableViews.TableView act(@PathVariable UUID tableId, @Valid @RequestBody Requests.PlayerAction request) {
         return service.act(tableId, request.playerId(), request.reconnectToken(),

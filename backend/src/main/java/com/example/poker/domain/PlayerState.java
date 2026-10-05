@@ -17,6 +17,8 @@ public final class PlayerState {
     private int handBet;
     private boolean acted;
     private boolean raiseAllowed;
+    private boolean leaving;
+    private boolean timedOut;
     private PlayerStatus status = PlayerStatus.SITTING;
     private final List<Card> holeCards = new ArrayList<>(2);
 
@@ -54,10 +56,15 @@ public final class PlayerState {
     public int handBet() { return handBet; }
     public boolean acted() { return acted; }
     public boolean raiseAllowed() { return raiseAllowed; }
+    public boolean leaving() { return leaving; }
+    public boolean timedOut() { return timedOut; }
+    public void markTimedOut() { timedOut = true; }
+    public void requestLeave() { leaving = true; }
     public PlayerStatus status() { return status; }
     public List<Card> holeCards() { return List.copyOf(holeCards); }
 
     public void startHand() {
+        timedOut = false;
         streetBet = 0;
         handBet = 0;
         acted = false;
