@@ -152,6 +152,16 @@ public class TableService {
         });
     }
 
+    /** 账号当前占用的牌桌（管理员用，不需要 accountToken）。用于删除账号前的安全校验。 */
+    public Optional<UUID> accountTableId(UUID accountId) {
+        if (accountId == null) return Optional.empty();
+        return sortedTables().stream()
+                .filter(table -> table.access(() -> table.players().stream()
+                        .anyMatch(player -> accountId.equals(player.accountId()))))
+                .map(PokerTable::id)
+                .findFirst();
+    }
+
     public Optional<TableViews.SessionView> accountSeat(UUID accountId, UUID accountToken) {
         AccountService.StoredIdentity identity = accounts.identity(accountId, accountToken);
         return sortedTables().stream()

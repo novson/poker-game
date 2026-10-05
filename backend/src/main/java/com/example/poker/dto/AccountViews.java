@@ -18,6 +18,13 @@ public final class AccountViews {
     public record ModeStats(int hands, int wins, int ties, int losses,
                             int netChips, double winRate) {}
 
+    /** 管理员视角的账号摘要：不含任何凭证（token / 登录码散列都不外泄）。 */
+    public record AdminAccount(UUID id, String nickname, int chips, Instant createdAt,
+                               Instant lastSeenAt, int hands) {}
+
+    /** 管理员改账号的结果；loginCode 仅在本次设置了新码时返回明文，否则为 null。 */
+    public record AdminAccountUpdate(AdminAccount account, String loginCode) {}
+
     public record HandRecord(UUID id, Instant playedAt, UUID tableId, String tableName,
                              long handNumber, String mode, String result,
                              int netChips, int endingChips) {}

@@ -25,12 +25,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 @Service
 public class AccountService {
     private static final int FORMAT_VERSION = 2;
     private static final int PROFILE_HISTORY_LIMIT = 100;
     private static final char[] LOGIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
+    private static final Pattern CUSTOM_LOGIN_CODE = Pattern.compile("[A-Z0-9]{12}");
 
     private final ObjectMapper mapper;
     private final PokerSettings settings;
@@ -78,13 +80,84 @@ public class AccountService {
     }
 
     public synchronized AccountViews.LoginCode rotateLoginCode(UUID accountId, UUID accountToken) {
-        StoredAccount account = authenticate(accountId, accountToken);
-        String loginCode = generateLoginCode();
+        return rotateLoginCode(accountId, accountToken, null);
+    }
+
+    /**
+     * 更换跨设备登录码。requestedCode 为空时随机生成（保持既有行为）；
+     * 传入则使用指定码，需为 12 位字母或数字且未被其他账号占用。
+     */
+    public synchronized AccountViews.LoginCode rotateLoginCode(UUID accountId, UUID accountToken,
+                                                               String requestedCode) {
+        return applyLoginCode(authenticate(accountId, accountToken), requestedCode);
+    }
+
+    public synchronized List<AccountViews.AdminAccount> adminList() {
+        return accounts.values().stream().map(this::adminView).toList();
+    }
+
+    /** 管理员改账号：nickname / chips / loginCode 任一为空表示保持不变。 */
+    public synchronized AccountViews.AdminAccountUpdate adminUpdate(UUID accountId, String rawNickname,
+                                                                    Integer chips, String rawLoginCode) {
+        StoredAccount account = require(accountId);
+        String nickname = rawNickname == null || rawNickname.isBlank()
+                ? account.nickname() : normalizeNickname(rawNickname);
+        if (!nickname.equalsIgnoreCase(account.nickname()) && nicknameTaken(nickname, accountId))
+            throw new IllegalArgumentException("该昵称已被其他账号使用");
+        String loginCode = rawLoginCode == null || rawLoginCode.isBlank()
+                ? null : requireCustomLoginCode(rawLoginCode);
+        if (loginCode != null) ensureCodeUnused(loginCode, accountId);
+        StoredAccount updated = new StoredAccount(account.id(), account.token(), nickname,
+                chips == null ? account.chips() : chips,
+                loginCode == null ? account.loginCodeHash() : hashLoginCode(loginCode),
+                account.createdAt(), Instant.now(), account.hands());
+        accounts.put(account.id(), updated);
+        persist();
+        return new AccountViews.AdminAccountUpdate(adminView(updated),
+                loginCode == null ? null : formatLoginCode(loginCode));
+    }
+
+    public synchronized void adminDelete(UUID accountId) {
+        require(accountId);
+        accounts.remove(accountId);
+        persist();
+    }
+
+    private AccountViews.AdminAccount adminView(StoredAccount account) {
+        return new AccountViews.AdminAccount(account.id(), account.nickname(), account.chips(),
+                account.createdAt(), account.lastSeenAt(), account.hands().size());
+    }
+
+    private boolean nicknameTaken(String nickname, UUID selfId) {
+        return accounts.values().stream()
+                .anyMatch(other -> !other.id().equals(selfId) && other.nickname().equalsIgnoreCase(nickname));
+    }
+
+    private AccountViews.LoginCode applyLoginCode(StoredAccount account, String requestedCode) {
+        String loginCode = requestedCode == null || requestedCode.isBlank()
+                ? generateLoginCode() : formatLoginCode(requireCustomLoginCode(requestedCode));
+        ensureCodeUnused(loginCode, account.id());
         StoredAccount updated = new StoredAccount(account.id(), account.token(), account.nickname(),
                 account.chips(), hashLoginCode(loginCode), account.createdAt(), Instant.now(), account.hands());
         accounts.put(account.id(), updated);
         persist();
         return new AccountViews.LoginCode(loginCode);
+    }
+
+    private String requireCustomLoginCode(String rawLoginCode) {
+        String code = normalizeLoginCode(rawLoginCode);
+        if (code.length() != 12)
+            throw new IllegalArgumentException("跨设备登录码需要 12 位字母或数字");
+        if (!CUSTOM_LOGIN_CODE.matcher(code).matches())
+            throw new IllegalArgumentException("跨设备登录码只能包含字母和数字");
+        return code;
+    }
+
+    private void ensureCodeUnused(String loginCode, UUID selfId) {
+        String hash = hashLoginCode(loginCode);
+        boolean taken = accounts.values().stream()
+                .anyMatch(other -> !other.id().equals(selfId) && hash.equals(other.loginCodeHash()));
+        if (taken) throw new IllegalArgumentException("该跨设备登录码已被其他账号使用");
     }
 
     public synchronized AccountViews.Profile profile(UUID accountId, UUID accountToken) {
