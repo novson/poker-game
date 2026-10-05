@@ -26,6 +26,7 @@ const accountProfile = ref(null)
 const accountOpen = ref(false)
 const accountMode = ref('CREATE')
 const loginCode = ref('')
+const customCode = ref('')
 const codeCopied = ref(false)
 const historyFilter = ref('ALL')
 const tableName = ref('周末牌局')
@@ -57,6 +58,9 @@ const adminToken = ref(sessionStorage.getItem('poker.adminToken') || '')
 const adminAuthenticated = ref(false)
 const adminSettings = ref({ ...tableSettings.value })
 const adminTables = ref([])
+const adminAccounts = ref([])
+const accountEdits = ref({})
+const adminMessage = ref('')
 const moneyPresets = [
   { name: '入门 1/2', totalChips: 1000, minBuyIn: 100, defaultBuyIn: 200, maxBuyIn: 400, smallBlind: 1, bigBlind: 2 },
   { name: '标准 10/20', totalChips: 10000, minBuyIn: 1000, defaultBuyIn: 2000, maxBuyIn: 4000, smallBlind: 10, bigBlind: 20 },
@@ -211,14 +215,21 @@ async function loginAccountFromPanel() {
   await run(() => restoreAccountSeat(true, false))
 }
 
-async function rotateLoginCode() {
+// requestedCode 为空时随机生成；传入则使用指定码（12 位字母或数字）
+async function rotateLoginCode(requestedCode) {
   if (!accountSession.value) return
+  const trimmed = String(requestedCode ?? '').trim()
+  if (trimmed && !/^[A-Za-z0-9]{12}$/.test(trimmed.replace(/[-\s]/g, '').toUpperCase())) {
+    error.value = '自定义登录码需要 12 位字母或数字'
+    return
+  }
   if (accountSession.value.loginCode
-      && !window.confirm('生成新登录码后，旧登录码将不能再用于新设备登录。继续吗？')) return
+      && !window.confirm('更换登录码后，旧登录码将不能再用于新设备登录。继续吗？')) return
   const result = await run(() => api.rotateAccountLoginCode(accountSession.value.accountId,
-    accountSession.value.accountToken))
+    accountSession.value.accountToken, trimmed || null))
   if (!result) return
   accountSession.value = savePokerAccount({ ...accountSession.value, loginCode: result.loginCode })
+  customCode.value = ''
   codeCopied.value = false
 }
 
@@ -539,13 +550,62 @@ async function authenticateAdmin() {
   if (!adminToken.value.trim()) { error.value = '请输入管理员口令'; return }
   const result = await run(() => Promise.all([
     api.adminSettings(adminToken.value),
-    api.adminTables(adminToken.value)
+    api.adminTables(adminToken.value),
+    // 兼容尚未提供账号管理接口的后端：拉取失败时降级为空列表
+    api.adminAccounts(adminToken.value).catch(() => [])
   ]))
   if (!result) return
   adminSettings.value = result[0]
   adminTables.value = result[1]
+  applyAccountList(result[2] || [])
   adminAuthenticated.value = true
   sessionStorage.setItem('poker.adminToken', adminToken.value)
+}
+
+function applyAccountList(list) {
+  adminAccounts.value = list
+  accountEdits.value = Object.fromEntries(list.map(item => [item.id,
+    { nickname: item.nickname, chips: item.chips, loginCode: '' }]))
+}
+
+function formatAdminDate(value) {
+  if (!value) return '从未登录'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '从未登录' : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function saveAdminAccount(item) {
+  const draft = accountEdits.value[item.id]
+  if (!draft) return
+  const nickname = String(draft.nickname ?? '').trim()
+  const loginCode = String(draft.loginCode ?? '').trim()
+  if (!nickname) { adminMessage.value = '昵称不能为空'; return }
+  if (loginCode && !/^[A-Za-z0-9]{12}$/.test(loginCode.replace(/[-\s]/g, '').toUpperCase())) {
+    adminMessage.value = '登录码需要 12 位字母或数字'
+    return
+  }
+  const chips = Number(draft.chips)
+  const updated = await run(() => api.updateAdminAccount(adminToken.value, item.id, {
+    nickname,
+    chips: Number.isFinite(chips) ? chips : undefined,
+    loginCode: loginCode || undefined
+  }))
+  if (!updated) return
+  const list = await run(() => api.adminAccounts(adminToken.value))
+  if (list) applyAccountList(list)
+  adminMessage.value = updated.loginCode
+    ? `已保存 ${nickname}，新登录码 ${updated.loginCode}（仅此一次显示）`
+    : `已保存 ${nickname}`
+}
+
+async function removeAdminAccount(item) {
+  if (!window.confirm(`确定删除账号“${item.nickname}”吗？该账号的筹码与战绩将一并删除，无法恢复。`)) return
+  const list = await run(async () => {
+    await api.deleteAdminAccount(adminToken.value, item.id)
+    return api.adminAccounts(adminToken.value)
+  })
+  if (list) applyAccountList(list)
+  adminMessage.value = `已删除账号 ${item.nickname}`
 }
 
 async function saveAdminSettings() {
@@ -734,6 +794,24 @@ onBeforeUnmount(() => {
           </article>
         </div>
         <p v-else class="admin-empty">当前没有牌桌</p>
+        <div class="admin-table-title"><strong>账号管理</strong><span>{{ adminAccounts.length }} 个</span></div>
+        <p v-if="adminMessage" class="admin-notice">{{ adminMessage }}</p>
+        <div v-if="adminAccounts.length" class="admin-account-list">
+          <article v-for="item in adminAccounts" :key="item.id">
+            <div class="admin-account-head">
+              <strong>{{ item.nickname }}</strong>
+              <small>{{ item.chips }} 筹码 · {{ item.hands }} 手 · 最近 {{ formatAdminDate(item.lastSeenAt) }}</small>
+            </div>
+            <div v-if="accountEdits[item.id]" class="admin-account-edit">
+              <input v-model="accountEdits[item.id].nickname" maxlength="16" placeholder="昵称" />
+              <input v-model.number="accountEdits[item.id].chips" type="number" min="0" max="10000000" placeholder="筹码" />
+              <input v-model="accountEdits[item.id].loginCode" maxlength="14" placeholder="新登录码（12 位，留空不变）" />
+              <button type="button" :disabled="busy" @click="saveAdminAccount(item)">保存</button>
+              <button class="delete-table" type="button" :disabled="busy" @click="removeAdminAccount(item)">删除</button>
+            </div>
+          </article>
+        </div>
+        <p v-else class="admin-empty">当前没有账号</p>
       </template>
     </section>
   </div>
@@ -767,10 +845,14 @@ onBeforeUnmount(() => {
           <template v-if="accountSession?.loginCode">
             <code>{{ accountSession.loginCode }}</code>
             <button type="button" @click="copyLoginCode">{{ codeCopied ? '已复制' : '复制' }}</button>
-            <button class="rotate-code" type="button" :disabled="busy" @click="rotateLoginCode">更换</button>
+            <button class="rotate-code" type="button" :disabled="busy" @click="rotateLoginCode(null)">随机更换</button>
           </template>
-          <button v-else class="generate-code" type="button" :disabled="busy" @click="rotateLoginCode">生成跨设备登录码</button>
+          <button v-else class="generate-code" type="button" :disabled="busy" @click="rotateLoginCode(null)">生成跨设备登录码</button>
         </section>
+        <div class="account-custom-code">
+          <input v-model="customCode" maxlength="14" placeholder="自定义登录码（12 位字母或数字）" @keyup.enter="rotateLoginCode(customCode)" />
+          <button type="button" :disabled="busy" @click="rotateLoginCode(customCode)">使用指定码</button>
+        </div>
         <div class="history-tabs" role="tablist" aria-label="战绩类型">
           <button v-for="item in [{ key: 'ALL', label: '全部' }, { key: 'AI', label: '人机' }, { key: 'HUMAN', label: '人人' }]"
             :key="item.key" type="button" :class="{ active: historyFilter === item.key }" @click="historyFilter = item.key">{{ item.label }}</button>

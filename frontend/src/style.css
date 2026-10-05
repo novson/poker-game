@@ -348,6 +348,19 @@ input[aria-invalid="true"] { border-color: #b97164; }
 .admin-table-list article small > span:first-child { color: var(--gold-2); }
 .delete-table { padding: 8px 12px; color: #efa194; background: rgba(116,45,37,.16); border: 1px solid rgba(225,120,102,.4); border-radius: 7px; }
 .admin-empty { padding: 32px; color: var(--ink-4); text-align: center; border: 1px dashed var(--line-soft); }
+.admin-notice { margin-bottom: 10px; padding: 8px 10px; color: var(--gold-1); background: rgba(214,173,88,.08); border: 1px solid rgba(214,173,88,.24); border-radius: 6px; font-size: 11px; }
+.admin-account-list { border-top: 1px solid var(--line-soft); }
+.admin-account-list article { padding: 11px 0; display: grid; gap: 7px; border-bottom: 1px solid var(--line-soft); }
+.admin-account-head { display: grid; gap: 3px; }
+.admin-account-head strong { color: var(--ink-2); }
+.admin-account-head small { color: var(--ink-4); font-size: 9px; }
+.admin-account-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.admin-account-edit input { flex: 1 1 110px; min-width: 0; min-height: 30px; padding: 5px 8px; color: var(--ink-2); background: rgba(2,16,13,.68); border: 1px solid var(--line-mid); border-radius: 5px; font-size: 11px; }
+.admin-account-edit button { min-height: 30px; padding: 5px 10px; color: var(--ink-2); background: rgba(18,55,45,.78); border: 1px solid var(--line-mid); border-radius: 5px; font-size: 10px; }
+.admin-account-edit .delete-table { color: #ff9d8a; border-color: rgba(255,157,138,.35); }
+.account-custom-code { margin-bottom: 13px; display: flex; gap: 7px; }
+.account-custom-code input { flex: 1 1 auto; min-width: 0; min-height: 31px; padding: 6px 9px; color: var(--ink-2); background: rgba(2,16,13,.68); border: 1px solid var(--line-mid); border-radius: 5px; font-size: 11px; }
+.account-custom-code button { min-height: 31px; padding: 6px 11px; color: var(--gold-1); background: rgba(18,55,45,.78); border: 1px solid rgba(214,173,88,.3); border-radius: 5px; font-size: 10px; white-space: nowrap; }
 
 /* Poker room frame */
 .room-shell { position: relative; height: 100dvh; min-height: 0; overflow: hidden; background: radial-gradient(circle at 50% 32%, rgba(18,72,58,.22), transparent 38%); }

@@ -31,8 +31,10 @@ export const api = {
   activeAccountSeat: (accountId, accountToken) => request(`/api/accounts/${accountId}/active-seat`, {
     headers: { 'X-Account-Token': accountToken }
   }),
-  rotateAccountLoginCode: (accountId, accountToken) => request(`/api/accounts/${accountId}/login-code`, {
-    method: 'POST', headers: { 'X-Account-Token': accountToken }
+  // loginCode 为空时服务端随机生成（省略即保持原行为）
+  rotateAccountLoginCode: (accountId, accountToken, loginCode) => request(`/api/accounts/${accountId}/login-code`, {
+    method: 'POST', headers: { ...jsonHeaders, 'X-Account-Token': accountToken },
+    body: JSON.stringify({ loginCode: loginCode || null })
   }),
   settings: () => request('/api/settings'),
   listTables: () => request('/api/tables'),
@@ -77,6 +79,17 @@ export const api = {
     headers: { 'X-Admin-Token': token }
   }),
   deleteAdminTable: (token, tableId) => request(`/api/admin/tables/${tableId}`, {
+    method: 'DELETE', headers: { 'X-Admin-Token': token }
+  }),
+  adminAccounts: (token) => request('/api/admin/accounts', {
+    headers: { 'X-Admin-Token': token }
+  }),
+  // patch 可含 nickname / chips / loginCode，省略的字段保持不变
+  updateAdminAccount: (token, accountId, patch) => request(`/api/admin/accounts/${accountId}`, {
+    method: 'PATCH', headers: { ...jsonHeaders, 'X-Admin-Token': token },
+    body: JSON.stringify(patch)
+  }),
+  deleteAdminAccount: (token, accountId) => request(`/api/admin/accounts/${accountId}`, {
     method: 'DELETE', headers: { 'X-Admin-Token': token }
   })
 }
