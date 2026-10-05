@@ -1,11 +1,18 @@
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
 async function request(url, options = {}) {
-  const response = await fetch(url, options)
+  let response
+  try {
+    response = await fetch(url, { ...options, signal: AbortSignal.timeout(15000) })
+  } catch (cause) {
+    throw new Error(cause.name === 'TimeoutError' ? '请求超时，请刷新牌桌确认结果后再操作' : '网络连接失败，请检查网络后重试')
+  }
   const body = await response.json().catch(() => ({}))
   if (!response.ok) {
-    const error = new Error(body.message || `请求失败（${response.status}）`)
+    const error = new Error(body.message || (response.status >= 500
+      ? '服务暂时不可用，请稍后重试' : `请求失败（${response.status}）`))
     error.status = response.status
+    error.code = body.code
     throw error
   }
   return body
@@ -42,6 +49,9 @@ export const api = {
   getTable: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}?${new URLSearchParams({ playerId, reconnectToken })}`),
   advice: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/advice?${new URLSearchParams({ playerId, reconnectToken })}`),
   start: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/start`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
+  }),
+  leave: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/leave`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
   }),
   act: (tableId, playerId, reconnectToken, type, raiseTo) => request(`/api/tables/${tableId}/actions`, {

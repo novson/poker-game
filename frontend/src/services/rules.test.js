@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { callAmount, canAllIn, canAutoStartNextHand, canStart, minimumRaiseTo, quickRaiseTo, validRaise } from './rules'
 
 describe('poker action rules', () => {
-  const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{}, {}] }
+  const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{ chips: 1000 }, { chips: 1000 }] }
   const player = { streetBet: 20, chips: 500 }
 
   it('calculates the outstanding call', () => {
@@ -25,6 +25,11 @@ describe('poker action rules', () => {
   it('starts only from a completed phase with two players', () => {
     expect(canStart(table)).toBe(false)
     expect(canStart({ ...table, phase: 'WAITING' })).toBe(true)
+    expect(canStart({ ...table, phase: 'SHOWDOWN', players: [{ chips: 100 }, { chips: 0 }] })).toBe(false)
+    expect(canStart({ ...table, phase: 'SHOWDOWN', minBuyIn: 1000,
+      players: [{ chips: 100 }, { chips: 0, ai: true, reserveChips: 900 }] })).toBe(false)
+    expect(canStart({ ...table, phase: 'SHOWDOWN', minBuyIn: 1000,
+      players: [{ chips: 100 }, { chips: 0, ai: true, reserveChips: 1000 }] })).toBe(true)
   })
 
   it('builds legal half-pot and pot-size raises', () => {
@@ -40,6 +45,8 @@ describe('poker action rules', () => {
     expect(canAutoStartNextHand(privateTable, privateTable.players[0])).toBe(true)
     expect(canAutoStartNextHand(privateTable, { ...privateTable.players[0], chips: 900 })).toBe(false)
     expect(canAutoStartNextHand({ ...privateTable, privateTable: false }, privateTable.players[0])).toBe(false)
+    expect(canAutoStartNextHand(privateTable, { ...privateTable.players[0], leaving: true })).toBe(false)
+    expect(canAutoStartNextHand(privateTable, { ...privateTable.players[0], timedOut: true })).toBe(false)
   })
 })
 

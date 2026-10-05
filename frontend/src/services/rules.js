@@ -3,7 +3,9 @@ export function callAmount(table, player) {
 }
 
 export function canStart(table) {
-  return ['WAITING', 'SHOWDOWN'].includes(table.phase) && table.players.length >= 2
+  return ['WAITING', 'SHOWDOWN'].includes(table.phase) && table.players.filter(player =>
+    !player.leaving && ((player.chips || 0) > 0 || (player.ai
+      && (player.reserveChips || 0) >= (table.minBuyIn || 1)))).length >= 2
 }
 
 export function minimumRaiseTo(table) {
@@ -35,9 +37,8 @@ export function quickRaiseTo(table, player, fraction) {
 }
 
 export function canAutoStartNextHand(table, player) {
-  if (!table?.privateTable || table.phase !== 'SHOWDOWN' || !player) return false
+  if (!table?.privateTable || table.phase !== 'SHOWDOWN' || !player || player.leaving || player.timedOut) return false
   if ((player.chips || 0) < (table.minBuyIn || 0)) return false
-  return table.players.some(other => other.id !== player.id
-    && ((other.chips || 0) > 0 || (other.ai && (other.reserveChips || 0) > 0)))
+  return canStart(table)
 }
 

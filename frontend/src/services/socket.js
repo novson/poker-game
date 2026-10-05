@@ -1,6 +1,7 @@
 import { Client } from '@stomp/stompjs'
 
-export function watchTable(tableId, onChange, onStatus, onEvent) {
+export function watchTable(tableId, onChange, onStatus, onEvent, onClosed) {
+  let stopped = false
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
   const client = new Client({
     brokerURL: `${scheme}://${location.host}/ws`,
@@ -8,19 +9,26 @@ export function watchTable(tableId, onChange, onStatus, onEvent) {
     heartbeatIncoming: 10000,
     heartbeatOutgoing: 10000,
     onConnect: () => {
+      if (stopped) return
       onStatus?.(true)
       client.subscribe(`/topic/tables/${tableId}`, message => {
+        if (stopped) return
         let event
         try { event = JSON.parse(message.body) } catch (_) { event = null }
-        if (event?.type === 'EMOTE') onEvent?.(event)
+        if (event?.version === -1) {
+          stopped = true
+          onStatus?.(false)
+          client.deactivate()
+          onClosed?.()
+        } else if (event?.type === 'EMOTE') onEvent?.(event)
         else onChange()
       })
       onChange()
     },
-    onWebSocketClose: () => onStatus?.(false),
-    onStompError: () => onStatus?.(false)
+    onWebSocketClose: () => { if (!stopped) onStatus?.(false) },
+    onStompError: () => { if (!stopped) onStatus?.(false) }
   })
   client.activate()
-  return () => client.deactivate()
+  return () => { stopped = true; return client.deactivate() }
 }
 

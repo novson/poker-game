@@ -5,8 +5,17 @@ import { api } from './services/api'
 import { clearPokerAccount, readPokerAccount, savePokerAccount } from './services/account'
 import { clearPokerSession, readPokerSession, savePokerSession } from './services/session'
 import { watchTable } from './services/socket'
+import { createTableRefresh, shouldApplyTable, tableExitMessage } from './services/tableSync'
+import { buyInState, tableAvailability } from './services/lobby'
 
 const tables = ref([])
+const tablesLoading = ref(false)
+const tablesLoaded = ref(false)
+const tablesError = ref('')
+const settingsReady = ref(false)
+const settingsLoading = ref(false)
+const initializing = ref(true)
+const seatPending = ref(false)
 const table = ref(null)
 const advice = ref(null)
 const playerId = ref('')
@@ -26,8 +35,19 @@ const aiPlayers = ref(maxPlayers.value - 1)
 const tableSettings = ref({ totalChips: 10000, minBuyIn: 1000, defaultBuyIn: 2000,
   maxBuyIn: 4000, smallBlind: 10, bigBlind: 20 })
 const buyIn = ref(2000)
+const availableBalance = computed(() => accountProfile.value?.chips ?? tableSettings.value.totalChips)
+const createBuyIn = computed(() => buyInState(tableSettings.value, buyIn.value, availableBalance.value))
+const entryBlocked = computed(() => busy.value || initializing.value || !settingsReady.value)
+function joinBuyIn(item) {
+  return buyInState(item, joinBuyIns.value[item.id], accountProfile.value?.chips ?? item.totalChips)
+}
 const joinBuyIns = ref({})
-const busy = ref(false)
+const pendingTasks = ref(0)
+const busy = computed(() => pendingTasks.value > 0)
+const tableSynced = ref(false)
+const refreshing = ref(false)
+const notice = ref('')
+let leavingTableId = ''
 const error = ref('')
 const connected = ref(false)
 const emoteEvent = ref(null)
@@ -60,35 +80,49 @@ const activeStats = computed(() => {
   return accountProfile.value.overall
 })
 let stopSocket
+let tableRefresh
+let fallbackTimer
 let adviceRequest = 0
+let lobbyTimer
+let lobbyRequest
 
 watch(maxPlayers, value => { aiPlayers.value = value - 1 })
 watch(privateTable, enabled => {
   if (enabled) aiPlayers.value = maxPlayers.value - 1
 })
 
-async function loadTables() {
-  try {
-    tables.value = await api.listTables()
-    for (const item of tables.value) {
-      const current = Number(joinBuyIns.value[item.id])
-      if (!current || current < item.minBuyIn || current > item.maxBuyIn)
-        joinBuyIns.value[item.id] = item.defaultBuyIn
-    }
-  } catch (e) { error.value = e.message }
+function loadTables() {
+  if (lobbyRequest) return lobbyRequest
+  tablesLoading.value = true
+  lobbyRequest = (async () => {
+    try {
+      const latest = await api.listTables()
+      tables.value = latest
+      joinBuyIns.value = Object.fromEntries(latest.map(item => [item.id,
+        joinBuyIns.value[item.id] ?? Math.min(item.defaultBuyIn, accountProfile.value?.chips ?? item.maxBuyIn)]))
+      tablesLoaded.value = true
+      tablesError.value = ''
+    } catch (e) { tablesError.value = e.message }
+    finally { tablesLoading.value = false; lobbyRequest = null }
+  })()
+  return lobbyRequest
 }
 
 async function loadSettings() {
+  if (settingsLoading.value) return
+  settingsLoading.value = true
   try {
     tableSettings.value = await api.settings()
     buyIn.value = tableSettings.value.defaultBuyIn
+    settingsReady.value = true
   } catch (e) { error.value = e.message }
+  finally { settingsLoading.value = false }
 }
 
 async function run(task, showError = true) {
-  busy.value = true
+  pendingTasks.value++
   error.value = ''
-  try { return await task() } catch (e) { if (showError) error.value = e.message } finally { busy.value = false }
+  try { return await task() } catch (e) { if (showError) error.value = e.message } finally { pendingTasks.value-- }
 }
 
 async function loadAccountProfile(silent = false) {
@@ -136,6 +170,7 @@ async function restoreAccountSeat(enterTable = false, silent = true) {
     session = await api.activeAccountSeat(accountSession.value.accountId,
       accountSession.value.accountToken)
   } catch (e) {
+    if (enterTable) throw e
     if (!silent) error.value = e.message
     return false
   }
@@ -173,7 +208,7 @@ async function loginAccountFromPanel() {
   nickname.value = session.profile.nickname
   loginCode.value = ''
   localStorage.setItem('poker.nickname', nickname.value)
-  await restoreAccountSeat(true, false)
+  await run(() => restoreAccountSeat(true, false))
 }
 
 async function rotateLoginCode() {
@@ -248,7 +283,7 @@ function remember(session) {
 async function resumeSession(silent = false) {
   const session = savedSession.value
   if (!session) return
-  busy.value = true
+  pendingTasks.value++
   error.value = ''
   let restored
   try {
@@ -261,7 +296,7 @@ async function resumeSession(silent = false) {
     } else if (!silent) error.value = e.message
     return
   } finally {
-    busy.value = false
+    pendingTasks.value--
   }
   playerId.value = session.playerId
   reconnectToken.value = restored.reconnectToken
@@ -274,14 +309,15 @@ async function resumeSession(silent = false) {
 }
 
 async function createTable() {
+  if (entryBlocked.value || seatPending.value) return
   if (!nickname.value.trim() || !tableName.value.trim()) return
-  const account = await ensureAccount()
-  if (!account) return
-  if (await restoreAccountSeat(true)) {
-    error.value = '已恢复该账号保留的牌局'
-    return
-  }
-  const session = await run(() => api.createTable({
+  if (!createBuyIn.value.valid) { error.value = createBuyIn.value.message; return }
+  seatPending.value = true
+  try { await run(async () => {
+    const account = await ensureAccount()
+    if (!account) return
+    if (await restoreAccountSeat(true)) return
+    const session = await api.createTable({
     tableName: tableName.value,
     nickname: nickname.value,
     accountId: account.accountId,
@@ -290,30 +326,95 @@ async function createTable() {
     privateTable: privateTable.value,
     aiPlayers: privateTable.value ? aiPlayers.value : 0,
     buyIn: Number(buyIn.value)
-  }))
-  if (session) remember(session)
+    })
+    remember(session)
+  }) } finally { seatPending.value = false }
 }
 
 async function join(item) {
+  if (entryBlocked.value || seatPending.value) return
+  if (!tableAvailability(item).available) return
   if (!nickname.value.trim()) { error.value = '请先输入昵称'; return }
-  const account = await ensureAccount()
-  if (!account) return
-  if (await restoreAccountSeat(true)) {
-    error.value = '已恢复该账号保留的牌局'
-    return
-  }
-  const session = await run(() => api.joinTable(item.id, nickname.value,
-    Number(joinBuyIns.value[item.id] ?? item.defaultBuyIn), account))
-  if (session) remember(session)
+  const amount = joinBuyIn(item)
+  if (!amount.valid) { error.value = amount.message; return }
+  seatPending.value = true
+  try { await run(async () => {
+    const account = await ensureAccount()
+    if (!account) return
+    if (await restoreAccountSeat(true)) return
+    const session = await api.joinTable(item.id, nickname.value, Number(joinBuyIns.value[item.id]), account)
+    remember(session)
+  }) } finally { seatPending.value = false }
 }
 
 async function refresh() {
-  if (!table.value || !playerId.value) return
-  const latest = await run(() => api.getTable(table.value.id, playerId.value, reconnectToken.value))
-  if (latest) {
-    table.value = latest
-    loadAdvice()
-    if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
+  return tableRefresh?.request()
+}
+
+function stopConnection() {
+  tableRefresh?.stop()
+  tableRefresh = null
+  stopSocket?.()
+  stopSocket = null
+  window.clearInterval(fallbackTimer)
+  connected.value = false
+  tableSynced.value = false
+  refreshing.value = false
+}
+
+function finishLeaving(message) {
+  stopConnection()
+  ++adviceRequest
+  clearPokerSession()
+  savedSession.value = null
+  table.value = null
+  advice.value = null
+  playerId.value = ''
+  reconnectToken.value = ''
+  leavingTableId = ''
+  error.value = ''
+  notice.value = message
+  loadTables()
+  loadAccountProfile(true)
+}
+
+function handleTableError(e, background = false) {
+  const exitMessage = tableExitMessage(e)
+  if (exitMessage) finishLeaving(exitMessage)
+  else {
+    tableSynced.value = false
+    if (!background) error.value = e.message
+  }
+}
+
+function applyTable(latest) {
+  if (!shouldApplyTable(table.value, latest)) return
+  if (!latest.players.some(player => player.id === playerId.value)) {
+    finishLeaving('已结算离桌，筹码与战绩已保存，可以加入其他牌桌')
+    return
+  }
+  table.value = latest
+  tableSynced.value = true
+  loadAdvice()
+  if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
+}
+
+async function updateTable(task) {
+  const id = table.value?.id
+  const viewer = playerId.value
+  if (!id || busy.value) return
+  pendingTasks.value++
+  error.value = ''
+  try {
+    const latest = await task(id, viewer, reconnectToken.value)
+    if (table.value?.id === id && playerId.value === viewer) applyTable(latest)
+  } catch (e) {
+    if (table.value?.id === id && playerId.value === viewer) {
+      handleTableError(e)
+      refresh()
+    }
+  } finally {
+    pendingTasks.value--
   }
 }
 
@@ -333,48 +434,82 @@ async function loadAdvice() {
 }
 
 function connect() {
-  stopSocket?.()
-  stopSocket = watchTable(table.value.id, refresh, value => { connected.value = value }, event => {
-    emoteEvent.value = { ...event, receivedAt: Date.now() }
+  stopConnection()
+  notice.value = ''
+  const id = table.value.id
+  const viewer = playerId.value
+  const token = reconnectToken.value
+  const current = () => table.value?.id === id && playerId.value === viewer
+  tableRefresh = createTableRefresh({
+    load: async () => {
+      refreshing.value = true
+      try { return await api.getTable(id, viewer, token) }
+      finally { if (current()) refreshing.value = false }
+    },
+    onTable: applyTable,
+    onError: e => handleTableError(e, true)
   })
+  stopSocket = watchTable(id, refresh, value => {
+    if (current()) {
+      connected.value = value
+      if (!value) tableSynced.value = false
+    }
+  }, event => {
+    if (current()) emoteEvent.value = { ...event, receivedAt: Date.now() }
+  }, () => {
+    if (current()) finishLeaving(leavingTableId === id || table.value.players.find(player => player.id === viewer)?.leaving
+      ? '已结算离桌，筹码与战绩已保存' : '牌桌已关闭，请选择其他牌桌')
+  })
+  fallbackTimer = window.setInterval(() => {
+    if (!connected.value || !tableSynced.value) refresh()
+  }, 4000)
+  refresh()
 }
 
 async function start() {
-  const latest = await run(() => api.start(table.value.id, playerId.value, reconnectToken.value))
-  if (latest) {
-    table.value = latest
-    loadAdvice()
-    if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
-  }
+  await updateTable((id, viewer, token) => api.start(id, viewer, token))
 }
 
 async function action(payload) {
-  const latest = await run(() => api.act(table.value.id, playerId.value, reconnectToken.value,
-    payload.type, payload.raiseTo))
-  if (latest) {
-    table.value = latest
-    loadAdvice()
-    if (latest.phase === 'SHOWDOWN') loadAccountProfile(true)
-  }
+  await updateTable((id, viewer, token) => api.act(id, viewer, token, payload.type, payload.raiseTo))
 }
 
 function leave() {
   if (!['WAITING', 'SHOWDOWN'].includes(table.value.phase)
       && !window.confirm('牌局仍在进行。暂时返回大厅后座位会保留，可通过“继续牌局”回来。确定暂离吗？')) return
-  stopSocket?.(); stopSocket = null; connected.value = false
+  stopConnection()
   if (savedSession.value) {
     savedSession.value = savePokerSession({ ...savedSession.value, autoResume: false })
   }
+  ++adviceRequest
   table.value = null; advice.value = null; playerId.value = ''; reconnectToken.value = ''; loadTables()
 }
 
 async function adjustChips(type, amount) {
   const method = type === 'TOP_UP' ? api.topUp : api.cashOut
-  const latest = await run(() => method(table.value.id, playerId.value, reconnectToken.value,
-    Number(amount)))
-  if (latest) {
-    table.value = latest
-    loadAccountProfile(true)
+  await updateTable((id, viewer, token) => method(id, viewer, token, Number(amount)))
+  loadAccountProfile(true)
+}
+
+async function settleLeave() {
+  const id = table.value?.id
+  const viewer = playerId.value
+  if (!id || busy.value) return
+  pendingTasks.value++
+  leavingTableId = id
+  error.value = ''
+  try {
+    const result = await api.leave(id, viewer, reconnectToken.value)
+    if (table.value?.id !== id || playerId.value !== viewer) return
+    if (result.pending) {
+      applyTable(result.table)
+      notice.value = '已预约本手结束后离桌；你仍可继续行动，结算后会自动返回大厅'
+    } else finishLeaving('已结算离桌，筹码已保存，可以加入其他牌桌')
+  } catch (e) {
+    if (table.value?.id === id && playerId.value === viewer) handleTableError(e)
+  } finally {
+    if (leavingTableId === id) leavingTableId = ''
+    pendingTasks.value--
   }
 }
 
@@ -387,10 +522,12 @@ async function sendEmote(emoteId) {
 }
 
 async function initialize() {
-  await Promise.all([loadSettings(), loadTables(), loadAccountProfile(true)])
-  if (savedSession.value?.autoResume) await resumeSession(true)
-  if (!table.value && !savedSession.value && accountSession.value)
-    await restoreAccountSeat(false)
+  try {
+    await Promise.all([loadSettings(), loadTables(), loadAccountProfile(true)])
+    if (savedSession.value?.autoResume) await resumeSession(true)
+    if (!table.value && !savedSession.value && accountSession.value)
+      await restoreAccountSeat(false)
+  } finally { initializing.value = false }
 }
 
 async function openAdmin() {
@@ -455,14 +592,34 @@ function closeAdmin() {
   adminOpen.value = false
 }
 
-onMounted(initialize)
-onBeforeUnmount(() => stopSocket?.())
+function refreshWhenVisible() {
+  if (document.visibilityState !== 'visible') return
+  if (table.value) refresh()
+  else {
+    loadTables()
+    if (!settingsReady.value) loadSettings()
+  }
+}
+onMounted(() => {
+  initialize()
+  lobbyTimer = window.setInterval(() => {
+    if (!table.value && document.visibilityState === 'visible') loadTables()
+  }, 8000)
+  window.addEventListener('online', refreshWhenVisible)
+  document.addEventListener('visibilitychange', refreshWhenVisible)
+})
+onBeforeUnmount(() => {
+  stopConnection()
+  window.clearInterval(lobbyTimer)
+  window.removeEventListener('online', refreshWhenVisible)
+  document.removeEventListener('visibilitychange', refreshWhenVisible)
+})
 </script>
 
 <template>
   <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice"
-    :busy="busy" :connected="connected" :emote-event="emoteEvent"
-    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" />
+    :busy="busy" :connected="connected && tableSynced" :refreshing="refreshing" :emote-event="emoteEvent"
+    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" @settle-leave="settleLeave" @refresh="refresh" />
   <main v-else class="lobby-shell">
     <nav class="brand">
       <div class="brand-lockup">
@@ -510,33 +667,36 @@ onBeforeUnmount(() => stopSocket?.())
         </div>
         <div class="create-essentials">
           <label>人数<select v-model.number="maxPlayers"><option v-for="n in [2,3,4,5,6]" :key="n" :value="n">{{ n }} 人桌</option></select></label>
-          <label>带入筹码<input v-model.number="buyIn" type="number" :min="tableSettings.minBuyIn" :max="tableSettings.maxBuyIn" :step="tableSettings.bigBlind" required /></label>
+          <label>带入筹码<input v-model.number="buyIn" type="number" :min="createBuyIn.minimum" :max="createBuyIn.maximum" step="1" :aria-invalid="!createBuyIn.valid" aria-describedby="create-buy-in-help" required /></label>
         </div>
+        <p id="create-buy-in-help" class="buy-in-help" :class="{ invalid: !createBuyIn.valid }">{{ createBuyIn.message || `可带入 ${createBuyIn.minimum}–${createBuyIn.maximum} · 可用筹码 ${availableBalance}` }}</p>
+        <div v-if="!settingsReady && !settingsLoading && !initializing" class="lobby-error" role="alert">金额规则加载失败，重试后即可入座。<button type="button" @click="loadSettings">重试</button></div>
         <details class="create-advanced">
           <summary><span>更多设置</span><small>牌桌名称、AI 数量与金额说明</small></summary>
           <div class="create-advanced-body">
             <label>牌桌名称<input v-model="tableName" maxlength="30" required /></label>
             <label v-if="privateTable">AI 选手数量<select v-model.number="aiPlayers"><option v-for="n in maxPlayers - 1" :key="n" :value="n">{{ n }} 位 AI</option></select></label>
-            <p>允许带入 {{ tableSettings.minBuyIn }}–{{ tableSettings.maxBuyIn }}，本次总额度 {{ tableSettings.totalChips }}。</p>
+            <p>允许带入 {{ tableSettings.minBuyIn }}–{{ tableSettings.maxBuyIn }}，当前可用 {{ availableBalance }} 筹码。</p>
           </div>
         </details>
-        <button class="gold wide create-submit" :disabled="busy"><span>{{ busy ? '正在创建…' : '创建并入座' }}</span><b aria-hidden="true">→</b></button>
+        <button class="gold wide create-submit" :disabled="entryBlocked || !createBuyIn.valid"><span>{{ seatPending ? '正在入座…' : initializing || settingsLoading ? '正在准备…' : '创建并入座' }}</span><b aria-hidden="true">→</b></button>
       </form>
     </section>
 
     <section id="open-tables" class="tables-section">
-      <div class="section-title"><div><p class="eyebrow">OPEN TABLES</p><h2>正在开放的牌桌</h2><small>{{ tables.length ? `${tables.length} 张牌桌可查看` : '等待第一张牌桌' }}</small></div><button class="ghost-button" @click="loadTables"><span aria-hidden="true">↻</span> 刷新</button></div>
+      <div class="section-title"><div><p class="eyebrow">OPEN TABLES</p><h2>正在开放的牌桌</h2><small>{{ tablesError ? '暂时无法同步' : tablesLoaded ? `${tables.length} 张牌桌 · 每 8 秒自动更新` : '正在加载牌桌' }}</small></div><button class="ghost-button" data-testid="refresh-lobby" :disabled="tablesLoading" @click="loadTables"><span aria-hidden="true">↻</span> {{ tablesLoading ? '刷新中…' : tablesError ? '重试' : '刷新' }}</button></div>
+      <div v-if="tablesError" class="lobby-error" role="alert"><strong>牌桌列表更新失败</strong><span>{{ tablesError }}{{ tables.length ? '；下方保留上次结果，入座前请重试。' : '，请点击重试。' }}</span></div>
+      <div v-if="tablesLoading && !tablesLoaded && !tablesError" class="lobby-loading" role="status">正在加载牌桌…</div>
       <div v-if="tables.length" class="table-list">
         <article v-for="item in tables" :key="item.id" class="table-row">
           <div class="table-identity"><span class="table-monogram">R</span><span><strong>{{ item.name }}</strong><small><i class="phase-dot" :class="{ waiting: item.phase === 'WAITING' || item.phase === 'SHOWDOWN' }"></i>{{ item.phaseLabel }}</small></span></div>
           <span class="table-stakes"><strong>{{ item.smallBlind }}/{{ item.bigBlind }} · {{ item.playerCount }}/{{ item.maxPlayers }} 人</strong><small>总额度 {{ item.totalChips }}</small></span>
-          <label class="row-buy-in">带入<input v-model.number="joinBuyIns[item.id]" type="number" :min="item.minBuyIn" :max="item.maxBuyIn" :step="item.bigBlind" :title="`允许 ${item.minBuyIn}–${item.maxBuyIn}`" /></label>
-          <button :disabled="busy || item.playerCount >= item.maxPlayers || !['WAITING','SHOWDOWN'].includes(item.phase)" @click="join(item)">入座 <span aria-hidden="true">→</span></button>
+          <label class="row-buy-in">带入<input v-model.number="joinBuyIns[item.id]" type="number" :min="joinBuyIn(item).minimum" :max="joinBuyIn(item).maximum" step="1" :aria-invalid="!joinBuyIn(item).valid" :aria-describedby="`buy-in-${item.id}`" :disabled="!tableAvailability(item).available" /><small :id="`buy-in-${item.id}`" :class="{ invalid: !joinBuyIn(item).valid }">{{ joinBuyIn(item).message || `范围 ${joinBuyIn(item).minimum}–${joinBuyIn(item).maximum}` }}</small></label>
+          <button :disabled="entryBlocked || !!tablesError || !joinBuyIn(item).valid || !tableAvailability(item).available" @click="join(item)">{{ tableAvailability(item).label }} <span v-if="tableAvailability(item).available" aria-hidden="true">→</span></button>
         </article>
       </div>
-      <div v-else class="empty-lobby"><span>♠</span><strong>今晚的第一张牌桌，等你开局</strong><small>完成上方设置后即可立即入座</small></div>
+      <div v-else-if="tablesLoaded && !tablesError && !tablesLoading" class="empty-lobby"><span>♠</span><strong>今晚的第一张牌桌，等你开局</strong><small>完成上方设置后即可立即入座</small></div>
     </section>
-    <div v-if="error" class="toast" @click="error = ''">{{ error }} ×</div>
   </main>
   <div v-if="adminOpen" class="admin-overlay" @click.self="closeAdmin">
     <section class="admin-panel">
@@ -634,6 +794,8 @@ onBeforeUnmount(() => stopSocket?.())
       </template>
     </section>
   </div>
-  <div v-if="table && error" class="toast" @click="error = ''">{{ error }} ×</div>
+  <div v-if="error || notice" class="toast" :class="{ 'toast-info': !error }" :role="error ? 'alert' : 'status'">
+    <span>{{ error || notice }}</span>
+    <button type="button" aria-label="关闭提示" @click="error = ''; notice = ''">×</button>
+  </div>
 </template>
-
