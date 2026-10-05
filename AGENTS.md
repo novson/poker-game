@@ -225,6 +225,9 @@ B=http://localhost:8080          # 以下所有示例的基点
 | PUT | `/api/admin/settings` | `X-Admin-Token` | 管理员写金额规则 |
 | GET | `/api/admin/tables` | `X-Admin-Token` | 管理员列出全部牌桌（含私人） |
 | DELETE | `/api/admin/tables/{id}` | `X-Admin-Token` | 管理员强制删除牌桌 |
+| GET | `/api/admin/accounts` | `X-Admin-Token` | 管理员列出账号（不含凭证） |
+| PATCH | `/api/admin/accounts/{id}` | `X-Admin-Token` | 改昵称/筹码/登录码（均可省略） |
+| DELETE | `/api/admin/accounts/{id}` | `X-Admin-Token` | 删除账号（在座时拒绝） |
 | GET | `/actuator/health` | 公开 | Docker 健康检查 |
 
 ### 4.2 创建账号 & 登录
@@ -294,9 +297,17 @@ curl $B/api/accounts/$ID -H "X-Account-Token: $TOKEN"
 > `mode` ∈ `AI`（私人桌）/ `HUMAN`（公开桌）；`result` ∈ `WIN` / `TIE` / `LOSS`。平局不计入胜场，`winRate = wins / hands`。
 
 ```bash
-# 重置登录码（旧码立即失效）
+# 重置登录码（旧码立即失效）—— 不带 body 或 loginCode 为空 → 随机生成
 curl -X POST $B/api/accounts/$ID/login-code -H "X-Account-Token: $TOKEN"
 # → {"loginCode":"NEWC-ODE1-2345"}
+
+# 指定自定义登录码：12 位字母或数字，大小写与横杠都容忍，已被他人占用则拒绝
+curl -X POST $B/api/accounts/$ID/login-code \
+  -H 'Content-Type: application/json' -H "X-Account-Token: $TOKEN" \
+  -d '{"loginCode":"MYCODE123456"}'
+# → {"loginCode":"MYCO-DE12-3456"}   展示形态与随机码一致，登录时横杠可有可无
+# 非法 → 400 {"message":"自定义登录码需为 12 位字母或数字",...}
+# 冲突 → 400 {"message":"该登录码已被占用，请换一个",...}
 
 # 查账号是否还有保留座位 —— 有则 200，无则 204（无 body）
 curl -i $B/api/accounts/$ID/active-seat -H "X-Account-Token: $TOKEN"
@@ -495,6 +506,24 @@ curl $B/api/admin/tables -H "X-Admin-Token: $ADMIN"
 # 删除牌桌（在线玩家收到 version=-1 事件后自动退出房间）
 curl -X DELETE $B/api/admin/tables/$TABLE_ID -H "X-Admin-Token: $ADMIN"
 # → 204 No Content
+
+# 列出账号（不含任何凭证：无 token、无登录码散列）
+curl $B/api/admin/accounts -H "X-Admin-Token: $ADMIN"
+# → [ {"id":"...","nickname":"RiverKing","chips":9500,
+#       "createdAt":"2026-09-13T02:41:03.221Z","lastSeenAt":"...","hands":42} ]
+
+# 改账号：nickname / chips / loginCode 均可省略，省略即保持不变
+curl -X PATCH $B/api/admin/accounts/$ID \
+  -H 'Content-Type: application/json' -H "X-Admin-Token: $ADMIN" \
+  -d '{"nickname":"NewName","chips":8000,"loginCode":"ADMINSET1234"}'
+# → {"account":{...同上...},"loginCode":"ADMI-NSET-1234"}
+#   仅当本次设置了 loginCode 才回文明文（服务端只存散列），否则 loginCode 为 null
+# 昵称重复 → 400；chips 范围 0..10_000_000
+
+# 删除账号：账号仍在牌局中会被拒绝，需先让其离桌或删除牌桌
+curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
+# → 204 No Content
+# 在座 → 400 {"message":"该账号仍在牌桌 <tableId> 的牌局中，请先离桌再删除",...}
 ```
 
 ### 4.5 TableView 关键字段含义
@@ -529,6 +558,7 @@ curl -X DELETE $B/api/admin/tables/$TABLE_ID -H "X-Admin-Token: $ADMIN"
 `Requests.CreateTable`：`tableName 1–30`、`nickname 1–16`、`maxPlayers 2–6`、`aiPlayers 0–5` 且 < `maxPlayers`、`buyIn 1..10_000_000`，**公开桌不允许 AI**。
 `Requests.UpdateSettings`：`totalChips 100..10M`、`smallBlind 1..100k` 且 `bigBlind > smallBlind`、`minBuyIn ≥ 20*bigBlind`、`min ≤ default ≤ max ≤ totalChips`（`PokerSettings.validate()`）。
 `AccountService.normalizeNickname`：1–16 字符；`normalizeLoginCode`：12 位去横杠/空格大写后等价。
+自定义登录码额外要求 `requireCustomLoginCode`：去横杠大写后须匹配 `[A-Z0-9]{12}`，且不能与其他账号的散列冲突；存储/返回形态统一为 `XXXX-XXXX-XXXX`。服务端口径：明文只在「创建 / 重置 / 管理员改码」的响应里出现一次，`accounts.json` 只存 SHA-256（无盐）。
 
 ## 5. 前端模块分层
 
@@ -778,6 +808,14 @@ mvn -B spring-boot:run
 
 ### 13.8 版本守卫不可绕过
 任何来源的 `TableView`（REST 返回、STOMP 触发的刷新、乐观更新）都要经 `applyTable()` → `shouldApplyTable()` 版本比对，否则迟到的旧响应会**覆盖**新状态。
+
+### 13.9 远程重启别用 `pkill -f <jar 名>`
+`pkill -f poker-backend-1.0.0.jar` 会连**正在执行这条命令的 ssh/bash 自身**一起杀掉（它的命令行里就含这个字符串），表现为 ssh 直接断连、输出丢失、退出码 255。
+正确做法：先单独一次 `ps -eo pid,args | grep '[p]oker-backend'` 拿到 PID，再 `kill <pid>`；或分两条 ssh 命令执行。
+
+### 13.10 推送到 GitHub 走不通 `git push` 时的退路
+本机到 `github.com:443` 常被代理拦掉（`CONNECT tunnel failed, response 502`），但 `api.github.com` 可用：用 `gh auth token` + Git Data API（blob → tree → commit → 更新 ref）提交。
+**注意**：必须从 git 对象库取内容（`git cat-file blob $(git rev-parse HEAD:<path>)`），不要直接读工作区文件——Windows 工作区是 CRLF，直接上传会把仓库里的 LF 全改成 CRLF。
 
 ---
 
