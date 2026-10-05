@@ -106,6 +106,63 @@ class AccountServiceTest {
     }
 
     @Test
+    void canSetAFourDigitCrossDeviceLoginCode() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        AccountService service = new AccountService(new ObjectMapper().findAndRegisterModules(),
+                settings, temporaryDirectory.resolve("short-code.json"));
+        AccountViews.AccountSession session = service.create("ShortCode");
+
+        AccountViews.LoginCode shortCode = service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "1234");
+        assertThat(shortCode.loginCode()).isEqualTo("1234");
+        assertThat(service.login("ShortCode", "1234").accountId()).isEqualTo(session.accountId());
+        assertThatThrownBy(() -> service.login("ShortCode", session.loginCode()))
+                .hasMessageContaining("不正确");
+
+        // 位数不对或非纯数字都不接受
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "123"))
+                .hasMessageContaining("4 位数字或 12 位");
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "12345"))
+                .hasMessageContaining("4 位数字或 12 位");
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "12a4"))
+                .hasMessageContaining("4 位数字或 12 位");
+
+        // 管理员同样可以下发 4 位数字码
+        AccountViews.AdminAccountUpdate updated = service.adminUpdate(
+                session.accountId(), null, null, "8891");
+        assertThat(updated.loginCode()).isEqualTo("8891");
+        assertThat(service.login("ShortCode", "8891").accountId()).isEqualTo(session.accountId());
+
+        // 随机生成仍是 12 位（既有行为不变）
+        AccountViews.LoginCode random = service.rotateLoginCode(
+                session.accountId(), session.accountToken(), null);
+        assertThat(random.loginCode()).matches("[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}");
+        assertThat(service.login("ShortCode", random.loginCode()).accountId())
+                .isEqualTo(session.accountId());
+    }
+
+    @Test
+    void rejectsAFourDigitLoginCodeAlreadyUsedByAnotherAccount() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        AccountService service = new AccountService(new ObjectMapper().findAndRegisterModules(),
+                settings, temporaryDirectory.resolve("duplicate-short-code.json"));
+        AccountViews.AccountSession first = service.create("First");
+        AccountViews.AccountSession second = service.create("Second");
+
+        service.rotateLoginCode(first.accountId(), first.accountToken(), "2580");
+
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                second.accountId(), second.accountToken(), "2580"))
+                .hasMessageContaining("已被其他账号使用");
+        assertThat(service.login("First", "2580").accountId()).isEqualTo(first.accountId());
+        assertThatThrownBy(() -> service.login("Second", "2580"))
+                .hasMessageContaining("不正确");
+    }
+
+    @Test
     void rejectsACustomLoginCodeAlreadyUsedByAnotherAccount() {
         PokerSettings settings = new PokerSettings((Path) null);
         AccountService service = new AccountService(new ObjectMapper().findAndRegisterModules(),

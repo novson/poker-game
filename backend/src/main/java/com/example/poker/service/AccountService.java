@@ -33,6 +33,7 @@ public class AccountService {
     private static final int PROFILE_HISTORY_LIMIT = 100;
     private static final char[] LOGIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
     private static final Pattern CUSTOM_LOGIN_CODE = Pattern.compile("[A-Z0-9]{12}");
+    private static final Pattern SHORT_LOGIN_CODE = Pattern.compile("\\d{4}");
 
     private final ObjectMapper mapper;
     private final PokerSettings settings;
@@ -84,8 +85,8 @@ public class AccountService {
     }
 
     /**
-     * 更换跨设备登录码。requestedCode 为空时随机生成（保持既有行为）；
-     * 传入则使用指定码，需为 12 位字母或数字且未被其他账号占用。
+     * 更换跨设备登录码。requestedCode 为空时随机生成 12 位（保持既有行为）；
+     * 传入则使用指定码 —— 4 位纯数字或 12 位字母数字组合，且未被其他账号占用。
      */
     public synchronized AccountViews.LoginCode rotateLoginCode(UUID accountId, UUID accountToken,
                                                                String requestedCode) {
@@ -144,10 +145,12 @@ public class AccountService {
         return new AccountViews.LoginCode(loginCode);
     }
 
+    /** 自定义登录码：4 位纯数字，或 12 位字母数字组合；随机生成仍是 12 位。 */
     private String requireCustomLoginCode(String rawLoginCode) {
         String code = normalizeLoginCode(rawLoginCode);
+        if (SHORT_LOGIN_CODE.matcher(code).matches()) return code;
         if (code.length() != 12)
-            throw new IllegalArgumentException("跨设备登录码需要 12 位字母或数字");
+            throw new IllegalArgumentException("跨设备登录码需要 4 位数字或 12 位字母数字组合");
         if (!CUSTOM_LOGIN_CODE.matcher(code).matches())
             throw new IllegalArgumentException("跨设备登录码只能包含字母和数字");
         return code;
