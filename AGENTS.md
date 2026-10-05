@@ -99,7 +99,7 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 ### 3.4 认证三件套
 - **牌桌内**：`playerId + reconnectToken`（REST + STOMP 都用，挂在 URL 参数或 body）。
 - **账号**：`accountId + accountToken`（请求头 `X-Account-Token`），用于跨牌桌的现金/战绩；落盘时用 `token()` 校验，`loginCode` 用 SHA-256 散列存盘，明文只在生成/重置时返回一次。
-- **管理员**：`X-Admin-Token` 请求头；后端用 `MessageDigest.isEqual` 防时序攻击；未配置 token 时所有管理端点均拒绝。
+- **管理员**：`X-Admin-Token` 请求头；后端用 `MessageDigest.isEqual` 防时序攻击；口令来自 `poker.admin-token`（默认 `88914752`，可用 `POKER_ADMIN_TOKEN` 覆盖）。
 
 ### 3.5 实时推送协议
 - 客户端订阅 `/topic/tables/{tableId}`。
@@ -219,7 +219,7 @@ B=http://localhost:8080          # 以下所有示例的基点
 | POST | `/api/accounts` | 公开 | 创建账号（首登拿到明文登录码） |
 | POST | `/api/accounts/login` | 公开 | 用昵称 + 跨设备登录码换 session |
 | GET | `/api/accounts/{id}` | `X-Account-Token` | 个人主页（筹码 + 三段战绩） |
-| POST | `/api/accounts/{id}/login-code` | `X-Account-Token` | 重置登录码（旧码失效） |
+| POST | `/api/accounts/{id}/login-code` | `X-Account-Token` | 重置/指定登录码（旧码失效） |
 | GET | `/api/accounts/{id}/active-seat` | `X-Account-Token` | 查账号是否有保留座位（无则 204） |
 | GET | `/api/admin/settings` | `X-Admin-Token` | 管理员读金额规则 |
 | PUT | `/api/admin/settings` | `X-Admin-Token` | 管理员写金额规则 |
@@ -301,13 +301,20 @@ curl $B/api/accounts/$ID -H "X-Account-Token: $TOKEN"
 curl -X POST $B/api/accounts/$ID/login-code -H "X-Account-Token: $TOKEN"
 # → {"loginCode":"NEWC-ODE1-2345"}
 
-# 指定自定义登录码：12 位字母或数字，大小写与横杠都容忍，已被他人占用则拒绝
+# 指定自定义登录码：4 位纯数字，或 12 位字母数字组合；大小写与横杠都容忍，被他人占用则拒绝
 curl -X POST $B/api/accounts/$ID/login-code \
   -H 'Content-Type: application/json' -H "X-Account-Token: $TOKEN" \
   -d '{"loginCode":"MYCODE123456"}'
-# → {"loginCode":"MYCO-DE12-3456"}   展示形态与随机码一致，登录时横杠可有可无
-# 非法 → 400 {"message":"自定义登录码需为 12 位字母或数字",...}
-# 冲突 → 400 {"message":"该登录码已被占用，请换一个",...}
+# → {"loginCode":"MYCO-DE12-3456"}   12 位展示形态与随机码一致，登录时横杠可有可无
+
+curl -X POST $B/api/accounts/$ID/login-code \
+  -H 'Content-Type: application/json' -H "X-Account-Token: $TOKEN" \
+  -d '{"loginCode":"1234"}'
+# → {"loginCode":"1234"}   4 位数字码原样展示
+
+# 非法 → 400 {"message":"跨设备登录码需要 4 位数字或 12 位字母数字组合",...}
+# 12 位含符号 → 400 {"message":"跨设备登录码只能包含字母和数字",...}
+# 冲突 → 400 {"message":"该跨设备登录码已被其他账号使用",...}
 
 # 查账号是否还有保留座位 —— 有则 200，无则 204（无 body）
 curl -i $B/api/accounts/$ID/active-seat -H "X-Account-Token: $TOKEN"
@@ -482,7 +489,7 @@ curl -X POST $B/api/tables/$TABLE_ID/emotes \
 
 ### 4.4 管理员接口
 
-> 必须在启动前设置 `POKER_ADMIN_TOKEN`，否则所有管理端点返回 401（**不是** 403）。
+> 管理员登录密钥默认为 `88914752`（`application.yml` 里 `poker.admin-token` 的默认值），可用环境变量 `POKER_ADMIN_TOKEN` 覆盖；口令不对或缺失时所有管理端点返回 401（**不是** 403）。
 
 ```bash
 # 读取金额规则
@@ -558,7 +565,7 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 `Requests.CreateTable`：`tableName 1–30`、`nickname 1–16`、`maxPlayers 2–6`、`aiPlayers 0–5` 且 < `maxPlayers`、`buyIn 1..10_000_000`，**公开桌不允许 AI**。
 `Requests.UpdateSettings`：`totalChips 100..10M`、`smallBlind 1..100k` 且 `bigBlind > smallBlind`、`minBuyIn ≥ 20*bigBlind`、`min ≤ default ≤ max ≤ totalChips`（`PokerSettings.validate()`）。
 `AccountService.normalizeNickname`：1–16 字符；`normalizeLoginCode`：12 位去横杠/空格大写后等价。
-自定义登录码额外要求 `requireCustomLoginCode`：去横杠大写后须匹配 `[A-Z0-9]{12}`，且不能与其他账号的散列冲突；存储/返回形态统一为 `XXXX-XXXX-XXXX`。服务端口径：明文只在「创建 / 重置 / 管理员改码」的响应里出现一次，`accounts.json` 只存 SHA-256（无盐）。
+自定义登录码额外要求 `requireCustomLoginCode`：去横杠大写后匹配 `\d{4}`（4 位纯数字）或 `[A-Z0-9]{12}`，且不能与其他账号的散列冲突；12 位存储/返回形态统一为 `XXXX-XXXX-XXXX`，4 位原样返回。随机生成仍是 12 位。服务端口径：明文只在「创建 / 重置 / 管理员改码」的响应里出现一次，`accounts.json` 只存 SHA-256（无盐）。
 
 ## 5. 前端模块分层
 
