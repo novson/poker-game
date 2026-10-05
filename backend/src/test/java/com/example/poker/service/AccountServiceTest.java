@@ -77,6 +77,86 @@ class AccountServiceTest {
     }
 
     @Test
+    void canSetACustomCrossDeviceLoginCode() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        AccountService service = new AccountService(new ObjectMapper().findAndRegisterModules(),
+                settings, temporaryDirectory.resolve("custom-code.json"));
+        AccountViews.AccountSession session = service.create("CustomCode");
+
+        AccountViews.LoginCode custom = service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "abcd-efgh-ijkl");
+        assertThat(custom.loginCode()).isEqualTo("ABCD-EFGH-IJKL");
+        assertThat(service.login("CustomCode", "abcdefghijkl").accountId())
+                .isEqualTo(session.accountId());
+        assertThatThrownBy(() -> service.login("CustomCode", session.loginCode()))
+                .hasMessageContaining("不正确");
+
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "SHORT"))
+                .hasMessageContaining("12 位");
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                session.accountId(), session.accountToken(), "ABCDEFGHIJK!"))
+                .hasMessageContaining("字母和数字");
+
+        AccountViews.LoginCode random = service.rotateLoginCode(
+                session.accountId(), session.accountToken(), null);
+        assertThat(random.loginCode()).matches("[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}");
+        assertThat(service.login("CustomCode", random.loginCode()).accountId())
+                .isEqualTo(session.accountId());
+    }
+
+    @Test
+    void rejectsACustomLoginCodeAlreadyUsedByAnotherAccount() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        AccountService service = new AccountService(new ObjectMapper().findAndRegisterModules(),
+                settings, temporaryDirectory.resolve("duplicate-code.json"));
+        AccountViews.AccountSession first = service.create("First");
+        AccountViews.AccountSession second = service.create("Second");
+
+        service.rotateLoginCode(first.accountId(), first.accountToken(), "AAAA-BBBB-CCCC");
+
+        assertThatThrownBy(() -> service.rotateLoginCode(
+                second.accountId(), second.accountToken(), "aaaa-bbbb-cccc"))
+                .hasMessageContaining("已被其他账号使用");
+        assertThat(service.login("First", "AAAA-BBBB-CCCC").accountId()).isEqualTo(first.accountId());
+        assertThatThrownBy(() -> service.login("Second", "AAAA-BBBB-CCCC"))
+                .hasMessageContaining("不正确");
+    }
+
+    @Test
+    void adminCanListUpdateAndDeleteAccounts() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        AccountService service = new AccountService(new ObjectMapper().findAndRegisterModules(),
+                settings, temporaryDirectory.resolve("admin-accounts.json"));
+        AccountViews.AccountSession alice = service.create("Alice");
+        service.create("Bob");
+
+        assertThat(service.adminList()).hasSize(2);
+        assertThat(service.adminList()).extracting(AccountViews.AdminAccount::nickname)
+                .containsExactlyInAnyOrder("Alice", "Bob");
+
+        AccountViews.AdminAccountUpdate renamed = service.adminUpdate(
+                alice.accountId(), "Alicia", 5_000, null);
+        assertThat(renamed.account().nickname()).isEqualTo("Alicia");
+        assertThat(renamed.account().chips()).isEqualTo(5_000);
+        assertThat(renamed.loginCode()).isNull();
+
+        AccountViews.AdminAccountUpdate rotated = service.adminUpdate(
+                alice.accountId(), null, null, "zzzz-yyyy-xxxx");
+        assertThat(rotated.loginCode()).isEqualTo("ZZZZ-YYYY-XXXX");
+        assertThat(rotated.account().nickname()).isEqualTo("Alicia");
+        assertThat(service.login("Alicia", "ZZZZYYYYXXXX").accountId()).isEqualTo(alice.accountId());
+
+        assertThatThrownBy(() -> service.adminUpdate(alice.accountId(), "Bob", null, null))
+                .hasMessageContaining("已被其他账号使用");
+
+        service.adminDelete(alice.accountId());
+        assertThat(service.adminList()).hasSize(1);
+        assertThatThrownBy(() -> service.adminDelete(alice.accountId()))
+                .hasMessageContaining("账号不存在");
+    }
+
+    @Test
     void recordsACompletedAiHandAndUpdatesPersistentBankroll() {
         PokerSettings settings = new PokerSettings((Path) null);
         AccountService accounts = new AccountService(

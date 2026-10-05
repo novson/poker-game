@@ -47,10 +47,17 @@ public class AccountController {
         return accounts.profile(accountId, accountToken);
     }
 
+    /**
+     * 更换跨设备登录码。不带 body 或 body 中 loginCode 为空时随机生成（既有行为）；
+     * 带 loginCode 则使用指定码（12 位字母或数字）。
+     */
     @PostMapping("/{accountId}/login-code")
-    public AccountViews.LoginCode rotateLoginCode(@PathVariable UUID accountId,
-                                                   @RequestHeader("X-Account-Token") UUID accountToken) {
-        return accounts.rotateLoginCode(accountId, accountToken);
+    public AccountViews.LoginCode rotateLoginCode(
+            @PathVariable UUID accountId,
+            @RequestHeader("X-Account-Token") UUID accountToken,
+            @RequestBody(required = false) Requests.SetLoginCode request) {
+        return accounts.rotateLoginCode(accountId, accountToken,
+                request == null ? null : request.loginCode());
     }
 
     @GetMapping("/{accountId}/active-seat")

@@ -16,6 +16,14 @@ public final class Requests {
     public record LoginAccount(@NotBlank @Size(max = 16) String nickname,
                                @NotBlank String loginCode) {}
 
+    /** 自定义跨设备登录码；loginCode 为空或省略时服务端随机生成。 */
+    public record SetLoginCode(@Size(max = 16) String loginCode) {}
+
+    /** 管理员改账号：字段均为可选，省略即保持不变。 */
+    public record AdminUpdateAccount(@Size(max = 16) String nickname,
+                                     @Min(0) @Max(10_000_000) Integer chips,
+                                     @Size(max = 16) String loginCode) {}
+
     public record CreateTable(
             @NotBlank @Size(max = 30) String tableName,
             @NotBlank @Size(max = 16) String nickname,
