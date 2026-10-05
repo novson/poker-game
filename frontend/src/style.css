@@ -249,6 +249,13 @@ label > small { color: var(--ink-4); font-size: 11px; font-weight: 450; line-hei
 .table-stakes small { color: var(--ink-4); font: 10px var(--font-ui); }
 .row-buy-in { margin: 0; grid-template-columns: auto 1fr; align-items: center; gap: 7px; color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .row-buy-in input { padding: 9px 10px; }
+.row-buy-in > small { grid-column: 1 / -1; white-space: normal; }
+.buy-in-help { margin: -4px 0 14px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
+.buy-in-help.invalid, .row-buy-in > small.invalid { color: #efa194; }
+input[aria-invalid="true"] { border-color: #b97164; }
+.lobby-error { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 14px 16px; margin-bottom: 14px; border: 1px solid rgba(225,120,102,.4); border-radius: 9px; background: rgba(116,45,37,.16); color: #efa194; font-size: 12px; line-height: 1.6; }
+.lobby-error button { min-height: 40px; padding: 6px 14px; border: 1px solid currentColor; border-radius: 7px; }
+.lobby-loading { min-height: 190px; display: grid; place-items: center; color: var(--ink-3); border: 1px dashed var(--line-mid); border-radius: var(--radius-md); }
 .table-row > button { min-height: 40px; padding: 9px 12px; font-size: 12px; }
 .empty-lobby { min-height: 190px; display: grid; place-content: center; justify-items: center; gap: 7px; color: var(--ink-3); text-align: center; background: rgba(5,24,20,.38); border: 1px dashed var(--line-mid); border-radius: var(--radius-md); }
 .empty-lobby > span { color: rgba(214,173,88,.55); font: 30px var(--font-display); }
@@ -781,6 +788,80 @@ label > small { color: var(--ink-4); font-size: 11px; font-weight: 450; line-hei
   .room-shell.between-hands .control-panel { left:58%; width:42%; height:96px; }
   .room-shell.between-hands .bankroll-summary { display:none; }
   .voice-emote-dock,.strategy-panel { top:58px; }
+}
+
+/* Keep controls in the room flow so short screens and software keyboards cannot cover seats. */
+.room-shell,
+.room-shell:is(.active-hand,.between-hands,.has-turn-controls,.custom-raise-open) {
+  display:flex; flex-direction:column; padding-bottom:0;
+}
+.room-header { flex-shrink:0; width:100%; }
+.room-shell .table-stage {
+  order:2; flex:1 1 0; height:auto!important; min-height:0!important; padding:0!important;
+  display:flex; align-items:safe center; justify-content:safe center; overflow:auto;
+}
+.table-scene { flex:none; display:grid; place-items:center; }
+.room-shell .poker-table { aspect-ratio:auto; flex:none; }
+.room-shell .control-panel,
+.room-shell .bankroll-bar {
+  position:relative; flex-shrink:0; left:auto!important; right:auto; bottom:auto!important;
+  transform:none; margin:0 auto; width:min(1200px,calc(100% - 20px))!important;
+}
+.room-shell .control-panel { order:4; }
+.room-shell .bankroll-bar { order:3; }
+.room-shell:is(.between-hands,.has-turn-controls,.custom-raise-open) .control-panel,
+.room-shell:is(.between-hands,.has-turn-controls,.custom-raise-open) .bankroll-bar { height:auto; }
+.room-shell .bankroll-bar { overflow:visible; }
+.connection-banner { order:1; flex-shrink:0; display:flex; align-items:center; justify-content:center; gap:14px; padding:8px 12px; color:#f2ce97; background:#382b1b; border-bottom:1px solid #775c33; }
+.connection-banner > span { display:grid; gap:2px; }
+.connection-banner strong { font-size:12px; }
+.connection-banner small { font-size:11px; }
+.connection-banner button { flex:none; padding:8px 10px; background:#514126; border:1px solid #a58750; border-radius:6px; color:#fff1cf; font-size:12px; }
+.leave-panel { position:fixed; top:65px; left:16px; z-index:80; width:min(340px,calc(100vw - 32px)); display:grid; gap:10px; padding:18px; background:#0c2922; border:1px solid var(--line-mid); border-radius:12px; box-shadow:var(--shadow-lg); }
+.leave-panel header { display:flex; align-items:center; justify-content:space-between; }
+.leave-panel header button { border:0; background:transparent; color:var(--ink-2); font-size:24px; }
+.leave-panel p { margin:0; color:var(--ink-2); font-size:13px; line-height:1.7; }
+.leave-panel > button { min-height:44px; }
+.seat.folded .hole-cards { opacity:.25; }
+.seat.folded .player-chip { opacity:.65; }
+.player-state { color:var(--ink-2); font-size:10px; }
+.toast { display:flex; align-items:center; gap:12px; cursor:auto; }
+.toast button { flex:none; min-width:32px; min-height:32px; border:0; background:transparent; color:inherit; font-size:22px; }
+.toast-info { background:#163f33; border-color:#5c9c7e; color:#ecf5ee; }
+.room-shell ~ .toast { top:80px; bottom:auto; }
+.room-shell:has(.connection-banner) ~ .toast { top:auto; bottom:12px; }
+.turn-glance-clock { min-width:36px; display:grid; justify-items:center; color:var(--gold-1); border:1px solid var(--gold-3); border-radius:7px; padding:3px; }
+.turn-glance-clock strong { font:750 18px/1 var(--font-numeric); }
+.turn-glance-clock small { font-size:9px; }
+.turn-glance-clock.urgent { color:#ffb3a4; border-color:var(--danger); background:#532a22; }
+@media (max-width:700px) {
+  .room-shell .control-panel,.room-shell .bankroll-bar { width:100%!important; }
+  .room-shell.has-turn-controls .control-panel { min-height:0; display:grid; grid-template-rows:auto auto; padding:8px 10px calc(8px + env(safe-area-inset-bottom)); }
+  .room-shell .control-panel { padding-bottom:calc(8px + env(safe-area-inset-bottom)); }
+  .room-shell .bankroll-bar { min-height:0; padding:10px; }
+  .room-shell.between-hands:not(.chip-manager-open) .bankroll-bar { height:auto; min-height:54px; }
+  .room-shell .bankroll-summary { display:flex; }
+  .room-shell .bankroll-actions button { min-height:40px; }
+  .room-shell .bankroll-bar > small { display:block; font-size:11px; line-height:1.5; }
+  .room-shell .turn-glance { grid-template-columns:auto auto 1fr auto; gap:7px; min-height:42px; }
+  .room-shell .turn-glance-numbers { display:grid; gap:2px; font-size:10px; }
+  .room-shell .turn-glance-stack small { font-size:10px; }
+  .room-shell .actions button { min-height:44px; }
+  .room-shell .actions { grid-template-columns:repeat(6,minmax(0,1fr)); }
+  .room-shell .turn-controls .action-fold,.room-shell .turn-controls .action-call { grid-column:span 2; }
+  .room-shell .turn-controls .quick-raises { display:grid; }
+  .room-shell .turn-controls .quick-raises button { font-size:10px; }
+  .room-shell .connection { display:block; font-size:10px; }
+  .connection span { margin-right:4px; width:5px; height:5px; }
+  .room-tools { gap:6px; }
+  .room-header h1 { font-size:16px; }
+  .voice-emote-dock,.strategy-panel { top:64px; }
+  .room-shell:has(.connection-banner) .voice-emote-dock,.room-shell:has(.connection-banner) .strategy-panel { top:126px; }
+  .leave-panel { top:62px; }
+  .room-shell ~ .toast { top:68px; bottom:auto; font-size:13px; }
+}
+@media (max-width:360px) {
+  .room-shell .turn-glance { grid-template-columns:auto 1fr auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

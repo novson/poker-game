@@ -7,6 +7,7 @@ import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart a
   minimumRaiseTo, quickRaiseTo, validRaise } from '../services/rules'
 import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
 import { seatsFromViewer } from '../services/tableView'
+import { roomLayout } from '../services/roomLayout'
 
 const props = defineProps({
   table: Object,
@@ -14,9 +15,14 @@ const props = defineProps({
   advice: Object,
   busy: Boolean,
   connected: Boolean,
+  refreshing: Boolean,
   emoteEvent: Object
 })
-const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave'])
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'refresh'])
+const leavePanelOpen = ref(false)
+const tableStage = ref(null)
+const sceneLayout = ref(roomLayout(375, 435, true))
+let stageObserver
 const savedAudio = readAudioPreferences()
 const pokerAudio = createPokerAudio()
 const raiseTo = ref(40)
@@ -128,9 +134,9 @@ watch([
   const suggestion = suggestedTopUp(props.table, me.value)
   if (suggestion > 0) chipAmount.value = suggestion
 }, { immediate: true })
-watch([autoNextEligible, autoNext, () => props.busy], ([eligible, enabled, busy]) => {
+watch([autoNextEligible, autoNext, () => props.busy, () => props.connected], ([eligible, enabled, busy, connected]) => {
   clearAutoTimer()
-  if (!eligible || !enabled || busy) return
+  if (!eligible || !enabled || busy || !connected) return
   autoCountdown.value = 3
   autoTimer = window.setInterval(() => {
     autoCountdown.value--
@@ -166,14 +172,17 @@ watch(() => props.emoteEvent, event => {
 })
 
 function act(type) {
+  if (props.busy || !props.connected) return
   emit('action', { type, raiseTo: type === 'RAISE' ? Number(raiseTo.value) : null })
 }
 
 function quickRaise(amount) {
+  if (props.busy || !props.connected) return
   emit('action', { type: 'RAISE', raiseTo: Number(amount) })
 }
 
 function startHand() {
+  if (props.busy || !props.connected) return
   clearAutoTimer()
   emit('start')
 }
@@ -286,10 +295,16 @@ function holeCardMuted(player, card) {
 
 onMounted(() => {
   clockTimer = window.setInterval(() => { actionNow.value = Date.now() }, 200)
+  stageObserver = new ResizeObserver(([entry]) => {
+    const { width, height } = entry.contentRect
+    sceneLayout.value = roomLayout(width, height, window.matchMedia('(max-width: 700px)').matches)
+  })
+  stageObserver.observe(tableStage.value)
 })
 
 onBeforeUnmount(() => {
   clearAutoTimer()
+  stageObserver?.disconnect()
   if (emoteTimer) window.clearTimeout(emoteTimer)
   if (clockTimer) window.clearInterval(clockTimer)
   flightTimers.forEach(timer => window.clearTimeout(timer))
@@ -307,9 +322,10 @@ onBeforeUnmount(() => {
     'chip-manager-open': betweenHands && chipManagerOpen,
     'strategy-open': !betweenHands && strategyExpanded,
     'custom-raise-open': myTurn && customRaiseExpanded
-  }" @pointerdown="unlockAudio">
+  }" @pointerdown="unlockAudio" @keydown.esc="leavePanelOpen = false">
     <header class="room-header">
-      <button class="ghost-button room-back" @click="emit('leave')"><span aria-hidden="true">←</span><span>暂离牌桌</span></button>
+      <button class="ghost-button room-back" aria-label="离桌选项" :aria-expanded="leavePanelOpen"
+        @click="leavePanelOpen = !leavePanelOpen"><span aria-hidden="true">←</span><span>离桌</span></button>
       <div class="room-identity">
         <div class="room-meta"><span>{{ table.phaseLabel }}</span><i></i><span>HAND {{ table.handNumber || 0 }}</span></div>
         <h1>{{ table.name }}</h1>
@@ -322,6 +338,20 @@ onBeforeUnmount(() => {
           :aria-expanded="soundPanelOpen" aria-label="声音设置" @click="toggleSoundPanel"><span aria-hidden="true">♫</span><b>声音</b></button>
       </div>
     </header>
+
+    <section v-if="leavePanelOpen" class="leave-panel" aria-label="离桌选项">
+      <header><strong>离开牌桌</strong><button type="button" aria-label="关闭离桌选项" @click="leavePanelOpen = false">×</button></header>
+      <p>{{ betweenHands ? '结算离桌后可加入其他牌桌，筹码与战绩会保留。' : '本手结束后结算离桌，不影响本手下注和获胜资格。等待期间仍可行动。' }}</p>
+      <button class="gold" :disabled="busy || !connected || me?.leaving" @click="leavePanelOpen = false; clearAutoTimer(); emit('settle-leave')">
+        {{ me?.leaving ? '已预约本手结束后离桌' : betweenHands ? '结算离桌' : '本手结束后离桌' }}
+      </button>
+      <button class="ghost-button" @click="emit('leave')">暂离并保留座位</button>
+    </section>
+
+    <div v-if="!connected" class="connection-banner" role="status">
+      <span><strong>正在恢复连接</strong><small>行动计时仍由服务器继续，恢复同步后可操作</small></span>
+      <button type="button" :disabled="refreshing" @click="emit('refresh')">{{ refreshing ? '同步中…' : '重试同步' }}</button>
+    </div>
 
     <section v-if="soundPanelOpen" class="sound-panel" aria-label="声音设置">
       <header><strong>声音设置</strong><button type="button" @click="soundPanelOpen = false">关闭</button></header>
@@ -343,8 +373,9 @@ onBeforeUnmount(() => {
       </label>
     </section>
 
-    <section class="table-stage">
-      <div class="poker-table">
+    <section ref="tableStage" class="table-stage">
+      <div class="table-scene" :style="{ width: `${sceneLayout.sceneWidth}px`, height: `${sceneLayout.sceneHeight}px` }">
+      <div class="poker-table" :style="{ width: `${sceneLayout.tableWidth}px`, height: `${sceneLayout.tableHeight}px` }">
         <div class="felt-copy">
           <span><i>♠</i> RIVER ROOM <i>♦</i></span>
           <small>NO LIMIT · {{ table.smallBlind }}/{{ table.bigBlind }}</small>
@@ -379,7 +410,8 @@ onBeforeUnmount(() => {
           active: seat.player?.currentTurn,
           mine: seat.player?.id === playerId,
           winner: seat.player?.winner,
-          'all-in': seat.player?.status === 'ALL_IN'
+           'all-in': seat.player?.status === 'ALL_IN',
+           folded: seat.player?.status === 'FOLDED'
         }]">
           <template v-if="seat.player">
             <Transition name="voice-pop">
@@ -414,12 +446,14 @@ onBeforeUnmount(() => {
               <span v-if="seat.player.ai" class="ai-badge">AI</span>
               <span v-if="seat.player.winner" class="winner-badge">🏆 胜者</span>
               <strong class="player-name">{{ seat.player.nickname }}</strong>
+              <span v-if="seat.player.status === 'FOLDED'" class="player-state">已弃牌</span>
               <small class="player-stack" :title="`桌外备用 ${seat.player.reserveChips}`"><span aria-hidden="true">◉</span>{{ seat.player.chips }}</small>
             </div>
             <span v-if="seat.player.streetBet" class="bet-chip">{{ seat.player.streetBet }}</span>
           </template>
           <span v-else class="empty-label">空位</span>
         </div>
+      </div>
       </div>
     </section>
 
@@ -434,12 +468,13 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="chipManagerOpen" class="bankroll-actions">
         <label>调整金额<input v-model.number="chipAmount" type="number" min="1" :step="table.bigBlind" /></label>
-        <button :disabled="busy || !canTopUp" @click="transfer('TOP_UP')">补码</button>
-        <button :disabled="busy || !canCashOut" @click="transfer('CASH_OUT')">回收</button>
-        <button class="cash-all" :disabled="busy || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
+        <button :disabled="busy || !connected || !canTopUp" @click="transfer('TOP_UP')">补码</button>
+        <button :disabled="busy || !connected || !canCashOut" @click="transfer('CASH_OUT')">回收</button>
+        <button class="cash-all" :disabled="busy || !connected || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
       </div>
       <small v-if="chipManagerOpen">只可在两局之间调整；桌上需保持 {{ table.minBuyIn }}–{{ table.maxBuyIn }}，也可全部回收暂时停手。</small>
       <small v-if="table.privateTable && me.chips < table.minBuyIn" class="top-up-reminder">桌上筹码低于最低带入 {{ table.minBuyIn }}，自动下一局已暂停；补码后会自动恢复。</small>
+      <small v-else-if="table.privateTable && me.timedOut" class="top-up-reminder">上一手已超时，自动下一局已暂停；准备好后请手动开始。</small>
     </section>
 
     <section class="control-panel" :class="{ 'turn-controls': myTurn, busy }" :aria-busy="busy">
@@ -449,30 +484,33 @@ onBeforeUnmount(() => {
         </div>
         <div class="turn-glance-stack"><small>你的筹码</small><strong>{{ me.chips }}</strong></div>
         <div class="turn-glance-numbers"><span>底池 <strong>{{ table.pot }}</strong></span><span>跟注 <strong>{{ callAmount }}</strong></span></div>
+        <div class="turn-glance-clock" :class="{ urgent: actionClock.urgent }" role="timer" :aria-label="`剩余行动时间 ${actionClock.seconds} 秒`">
+          <strong>{{ actionClock.seconds || '…' }}</strong><small>{{ actionClock.seconds ? '秒' : '处理中' }}</small>
+        </div>
       </div>
       <div class="status-copy">
         <span class="status-kicker">{{ myTurn ? 'YOUR ACTION' : betweenHands ? 'TABLE STATUS' : 'LIVE ACTION' }}</span>
         <p>{{ table.message }}</p>
-        <small v-if="myTurn">轮到你了 · 跟注额 {{ callAmount }}</small>
-        <small v-else-if="!canStart">等待其他玩家行动</small>
+        <small v-if="myTurn">轮到你了 · {{ actionClock.seconds }} 秒 · 跟注额 {{ callAmount }}</small>
+        <small v-else-if="!canStart">{{ betweenHands ? '等待至少两名玩家准备好筹码' : '等待其他玩家行动' }}</small>
         <small v-else>至少两人即可开始下一局</small>
       </div>
       <div v-if="myTurn" class="actions" aria-label="牌局操作">
-        <button class="danger action-fold" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy" @click="act('FOLD')">弃牌</button>
-        <button v-if="callAmount === 0" class="action-call" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy" @click="act('CHECK')">过牌</button>
-        <button v-else class="action-call" :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
+        <button class="danger action-fold" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy || !connected" @click="act('FOLD')">弃牌</button>
+        <button v-if="callAmount === 0" class="action-call" :class="{ recommended: advice?.recommendedAction === 'CHECK' }" :disabled="busy || !connected" @click="act('CHECK')">过牌</button>
+        <button v-else class="action-call" :class="{ recommended: ['CALL','ALL_IN'].includes(advice?.recommendedAction) }" :disabled="busy || !connected" @click="act(callAmount >= me.chips ? 'ALL_IN' : 'CALL')">{{ callAmount >= me.chips ? `全押跟注 ${me.chips}` : `跟注 ${callAmount}` }}</button>
         <div v-if="quickRaises.length" class="quick-raises">
-          <button v-for="option in quickRaises" :key="option.amount" :class="{ recommended: option.label === '建议' }" :disabled="busy" @click="quickRaise(option.amount)">{{ option.label }} <strong>{{ option.amount }}</strong></button>
+          <button v-for="option in quickRaises" :key="option.amount" :class="{ recommended: option.label === '建议' }" :disabled="busy || !connected" @click="quickRaise(option.amount)">{{ option.label }} <strong>{{ option.amount }}</strong></button>
         </div>
         <button class="custom-raise-toggle action-raise" type="button" :class="{ active: customRaiseExpanded }" @click="customRaiseExpanded = !customRaiseExpanded">{{ customRaiseExpanded ? '收起自定义' : '自定义加注' }}</button>
-        <button v-if="callAmount < me.chips" class="all-in-button" :class="{ recommended: advice?.recommendedAction === 'ALL_IN' }" :disabled="busy || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
+        <button v-if="callAmount < me.chips" class="all-in-button" :class="{ recommended: advice?.recommendedAction === 'ALL_IN' }" :disabled="busy || !connected || !allInAllowed" @click="act('ALL_IN')">全押 {{ me.chips }}</button>
         <template v-if="customRaiseExpanded">
           <label class="raise-input">加注至 <input v-model.number="raiseTo" type="number" :min="minRaiseTo" :max="me.chips + me.streetBet - 1" :step="table.bigBlind" /></label>
-          <button class="gold custom-raise-confirm" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !canRaise" @click="act('RAISE')">确认加注</button>
+          <button class="gold custom-raise-confirm" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !connected || !canRaise" @click="act('RAISE')">确认加注</button>
         </template>
       </div>
-      <div v-else-if="canStart" class="next-hand-controls">
-        <button class="gold start-button" :disabled="busy" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
+      <div v-else-if="canStart && !me?.leaving" class="next-hand-controls">
+        <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
         <button v-if="autoCountdown" class="cancel-countdown" type="button" @click="clearAutoTimer">取消倒计时</button>
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
       </div>
