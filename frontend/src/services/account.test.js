@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clearPokerAccount, readPokerAccount, savePokerAccount } from './account'
+import { clearPokerAccount, normalizeLoginCodeInput, readPokerAccount, savePokerAccount } from './account'
 
 function memoryStorage() {
   const values = new Map()
@@ -34,5 +34,29 @@ describe('poker account storage', () => {
     savePokerAccount({ accountId: 'a', accountToken: 't', loginCode: 'ABCD-EFGH-JKLM', nickname: 'N' }, storage)
     clearPokerAccount(storage)
     expect(readPokerAccount(storage)).toBeNull()
+  })
+})
+
+describe('normalizeLoginCodeInput', () => {
+  it('accepts four digit codes', () => {
+    expect(normalizeLoginCodeInput('1234')).toEqual({ code: '1234', valid: true })
+    expect(normalizeLoginCodeInput(' 0000 ')).toEqual({ code: '0000', valid: true })
+  })
+
+  it('still accepts twelve character codes with or without dashes', () => {
+    expect(normalizeLoginCodeInput('abcd-efgh-ijkl')).toEqual({ code: 'ABCDEFGHIJKL', valid: true })
+    expect(normalizeLoginCodeInput('ABCD1234EFGH')).toEqual({ code: 'ABCD1234EFGH', valid: true })
+  })
+
+  it('rejects other lengths and non digit short codes', () => {
+    expect(normalizeLoginCodeInput('123').valid).toBe(false)
+    expect(normalizeLoginCodeInput('12345').valid).toBe(false)
+    expect(normalizeLoginCodeInput('12a4').valid).toBe(false)
+    expect(normalizeLoginCodeInput('abcd-efgh-ijk!').valid).toBe(false)
+  })
+
+  it('treats empty input as blank rather than invalid', () => {
+    expect(normalizeLoginCodeInput('')).toEqual({ code: '', valid: false })
+    expect(normalizeLoginCodeInput(null)).toEqual({ code: '', valid: false })
   })
 })

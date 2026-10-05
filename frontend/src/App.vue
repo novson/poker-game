@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PokerRoom from './components/PokerRoom.vue'
 import { api } from './services/api'
-import { clearPokerAccount, readPokerAccount, savePokerAccount } from './services/account'
+import { clearPokerAccount, normalizeLoginCodeInput, readPokerAccount, savePokerAccount } from './services/account'
 import { clearPokerSession, readPokerSession, savePokerSession } from './services/session'
 import { watchTable } from './services/socket'
 import { createTableRefresh, shouldApplyTable, tableExitMessage } from './services/tableSync'
@@ -215,18 +215,18 @@ async function loginAccountFromPanel() {
   await run(() => restoreAccountSeat(true, false))
 }
 
-// requestedCode 为空时随机生成；传入则使用指定码（12 位字母或数字）
+// requestedCode 为空时随机生成；传入则使用指定码（4 位数字或 12 位字母数字组合）
 async function rotateLoginCode(requestedCode) {
   if (!accountSession.value) return
-  const trimmed = String(requestedCode ?? '').trim()
-  if (trimmed && !/^[A-Za-z0-9]{12}$/.test(trimmed.replace(/[-\s]/g, '').toUpperCase())) {
-    error.value = '自定义登录码需要 12 位字母或数字'
+  const { code, valid } = normalizeLoginCodeInput(requestedCode)
+  if (code && !valid) {
+    error.value = '自定义登录码需要 4 位数字或 12 位字母数字组合'
     return
   }
   if (accountSession.value.loginCode
       && !window.confirm('更换登录码后，旧登录码将不能再用于新设备登录。继续吗？')) return
   const result = await run(() => api.rotateAccountLoginCode(accountSession.value.accountId,
-    accountSession.value.accountToken, trimmed || null))
+    accountSession.value.accountToken, code || null))
   if (!result) return
   accountSession.value = savePokerAccount({ ...accountSession.value, loginCode: result.loginCode })
   customCode.value = ''
@@ -578,10 +578,10 @@ async function saveAdminAccount(item) {
   const draft = accountEdits.value[item.id]
   if (!draft) return
   const nickname = String(draft.nickname ?? '').trim()
-  const loginCode = String(draft.loginCode ?? '').trim()
+  const { code: loginCode, valid } = normalizeLoginCodeInput(draft.loginCode)
   if (!nickname) { adminMessage.value = '昵称不能为空'; return }
-  if (loginCode && !/^[A-Za-z0-9]{12}$/.test(loginCode.replace(/[-\s]/g, '').toUpperCase())) {
-    adminMessage.value = '登录码需要 12 位字母或数字'
+  if (loginCode && !valid) {
+    adminMessage.value = '登录码需要 4 位数字或 12 位字母数字组合'
     return
   }
   const chips = Number(draft.chips)
@@ -805,7 +805,7 @@ onBeforeUnmount(() => {
             <div v-if="accountEdits[item.id]" class="admin-account-edit">
               <input v-model="accountEdits[item.id].nickname" maxlength="16" placeholder="昵称" />
               <input v-model.number="accountEdits[item.id].chips" type="number" min="0" max="10000000" placeholder="筹码" />
-              <input v-model="accountEdits[item.id].loginCode" maxlength="14" placeholder="新登录码（12 位，留空不变）" />
+              <input v-model="accountEdits[item.id].loginCode" maxlength="14" placeholder="新登录码（4 位数字或 12 位，留空不变）" />
               <button type="button" :disabled="busy" @click="saveAdminAccount(item)">保存</button>
               <button class="delete-table" type="button" :disabled="busy" @click="removeAdminAccount(item)">删除</button>
             </div>
@@ -850,7 +850,7 @@ onBeforeUnmount(() => {
           <button v-else class="generate-code" type="button" :disabled="busy" @click="rotateLoginCode(null)">生成跨设备登录码</button>
         </section>
         <div class="account-custom-code">
-          <input v-model="customCode" maxlength="14" placeholder="自定义登录码（12 位字母或数字）" @keyup.enter="rotateLoginCode(customCode)" />
+          <input v-model="customCode" maxlength="14" placeholder="自定义登录码（4 位数字或 12 位字母数字）" @keyup.enter="rotateLoginCode(customCode)" />
           <button type="button" :disabled="busy" @click="rotateLoginCode(customCode)">使用指定码</button>
         </div>
         <div class="history-tabs" role="tablist" aria-label="战绩类型">
