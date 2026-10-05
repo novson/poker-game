@@ -7,12 +7,21 @@
 - 创建牌桌、浏览牌桌、匿名昵称加入
 - 2–6 人座位、庄家位、大小盲注和行动顺序
 - 翻牌前、翻牌、转牌、河牌四轮下注
-- 过牌、跟注、加注、弃牌
+- 过牌、跟注、加注、弃牌、**全押与边池**
 - 5–7 张牌最佳牌型计算、摊牌比较、平局分池
-- WebSocket 实时刷新；公共消息不携带玩家底牌
-- 后端单元测试、前端生产构建、Docker Compose 和 Jenkins Pipeline
+- WebSocket 实时刷新；公共消息只推送状态版本号，**底牌永不外泄**
+- **无密码账号**：本地存储跨设备登录码，长期筹码与战绩落盘
+- **断线身份恢复**：`reconnectToken` 在刷新、关闭浏览器后能回到原座位
+- **离桌换桌**：两局之间直接结算离桌；局中预约本手结束后离桌，结算完成后释放座位，最后一名真人离桌时清理牌桌
+- **超时推进**：服务端每 500ms 检查 25 秒行动时限，到期自动过牌（无需跟注时）或弃牌；断线和暂离不暂停计时，AI 桌超时后暂停自动下一局
+- **移动端操作**：牌桌按可用高度布局，操作栏常驻显示自己的手牌、筹码和倒计时；断线时提示恢复同步，极短屏可滚动查看牌桌
+- **私人 AI 牌桌**：可加 1–5 个 AI 对手，并附带策略建议面板
+- **管理员后台**：调整盲注与买入范围，强制删除牌桌（需要 `POKER_ADMIN_TOKEN`）
+- 后端单元测试、前端 Vitest 与生产构建、Docker Compose 和 Jenkins Pipeline
 
-当前为 MVP：状态保存在单个后端进程内存，重启会清空；暂不支持全押/边池、账号系统、断线身份恢复和多实例部署。
+当前为 MVP：状态保存在单个后端进程内存，**牌桌**重启会清空；**账号与金额配置**已落盘为 JSON / properties 文件。多实例水平扩容、观察者、聊天等功能不在范围内。详细接口、领域规则与修改指南见 [`AGENTS.md`](./AGENTS.md)。
+
+`POST /api/tables/{id}/leave` 使用 `playerId + reconnectToken`，返回 `{pending, table}`：`pending=true` 表示已预约；`pending=false` 表示离桌完成。客户端仅接受当前牌桌、不低于当前 `version` 的状态；收到关闭事件或失效座位错误后停止订阅和重试，并返回大厅。上述功能需要前后端一同更新，后端重启会清空正在进行的牌桌。
 
 ## 一键启动
 
@@ -103,15 +112,29 @@ Jenkins 地址必须能被 GitHub 公网访问并具有有效 HTTPS 证书。若
 
 ## 主要接口
 
+> 完整接口、字段约束与认证方式见 [`AGENTS.md` §4](./AGENTS.md#4-完整-rest-接口清单)。
+
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/tables` | 牌桌列表 |
-| POST | `/api/tables` | 创建牌桌并入座 |
-| POST | `/api/tables/{id}/join` | 加入牌桌 |
-| GET | `/api/tables/{id}?playerId=...` | 获取该玩家可见状态 |
+| GET | `/api/settings` | 获取全局金额规则 |
+| GET | `/api/tables` | 公开牌桌列表 |
+| POST | `/api/tables` | 创建牌桌（可附账号入座） |
+| POST | `/api/tables/{id}/join` | 加入公开牌桌 |
+| GET | `/api/tables/{id}?playerId=...&reconnectToken=...` | 获取本玩家可见状态 |
+| GET | `/api/tables/{id}/advice?...` | 策略建议（仅私人 AI 桌） |
+| POST | `/api/tables/{id}/reconnect` | 断线重连，刷新 token |
 | POST | `/api/tables/{id}/start` | 开始下一局 |
 | POST | `/api/tables/{id}/actions` | 执行下注动作 |
-| WS | `/ws` | STOMP 连接端点 |
+| POST | `/api/tables/{id}/chips/top-up` | 桌上补码 |
+| POST | `/api/tables/{id}/chips/cash-out` | 回收筹码 |
+| POST | `/api/tables/{id}/emotes` | 发送语音表情 |
+| POST | `/api/accounts` | 创建长期账号 |
+| POST | `/api/accounts/login` | 用昵称 + 跨设备登录码登录 |
+| GET | `/api/accounts/{id}` | 个人主页（筹码 + 战绩） |
+| GET | `/api/accounts/{id}/active-seat` | 查询账号是否有保留座位 |
+| GET / PUT | `/api/admin/settings` | 管理员读写金额规则 |
+| GET / DELETE | `/api/admin/tables` | 管理员列出 / 删除牌桌 |
+| WS | `/ws` | STOMP 连接，订阅 `/topic/tables/{id}` |
 
 ## 项目结构
 
@@ -121,5 +144,7 @@ frontend/   Vue 3 大厅与实时牌桌
 compose.yml bridge 网络的一键部署
 Jenkinsfile GitHub push 自动触发的 CI 流水线
 ```
+
+更详细的模块说明、领域规则、修改工作流见 [`AGENTS.md`](./AGENTS.md)。
 
 本项目使用虚拟筹码，仅用于技术演示，不包含充值、提现或真钱赌博功能。
