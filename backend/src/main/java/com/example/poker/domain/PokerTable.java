@@ -1,5 +1,6 @@
 package com.example.poker.domain;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -28,6 +29,8 @@ public final class PokerTable {
     private final List<PlayerState> players = new ArrayList<>();
     private final List<Card> communityCards = new ArrayList<>(5);
     private final Supplier<Deck> deckFactory;
+    private Clock clock = Clock.systemUTC();
+    private long version;
     private Deck deck;
     private GamePhase phase = GamePhase.WAITING;
     private int dealerSeat = -1;
@@ -65,6 +68,45 @@ public final class PokerTable {
                Supplier<Deck> deckFactory) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
                 smallBlind, bigBlind, false, deckFactory);
+    }
+
+    PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
+               Supplier<Deck> deckFactory, Clock clock) {
+        this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, deckFactory);
+        this.clock = clock;
+    }
+
+    // Keep a command, its AI continuation, account settlement and snapshot in one table transaction.
+    // The scheduler uses this same monitor; services and controllers must not introduce another lock.
+    public synchronized <T> T access(Supplier<T> operation) { return operation.get(); }
+
+    public long version() { return version; }
+    public synchronized long advanceVersion() { return ++version; }
+
+    public synchronized void requestLeave(UUID playerId, UUID reconnectToken) {
+        authenticate(playerId, reconnectToken).requestLeave();
+    }
+
+    // Called only after the service persists the final balances and hand records.
+    public synchronized List<PlayerState> removeLeavingPlayers() {
+        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN) return List.of();
+        List<PlayerState> departed = players.stream().filter(PlayerState::leaving).toList();
+        for (PlayerState player : departed) {
+            if (player.chips() > 0) player.cashOut(player.chips());
+        }
+        players.removeAll(departed);
+        return departed;
+    }
+
+    public synchronized boolean expireTurn(Instant now) {
+        PlayerState player = currentPlayer();
+        if (player == null || player.ai() || player.status() != PlayerStatus.ACTIVE
+                || turnStartedAt == null || now.toEpochMilli() < actionDeadlineEpochMillis()) return false;
+        ActionType action = callAmount(player.id()) == 0 ? ActionType.CHECK : ActionType.FOLD;
+        act(player.id(), action, null);
+        player.markTimedOut();
+        message = player.nickname() + (action == ActionType.CHECK ? " 超时自动过牌 · " : " 超时自动弃牌 · ") + message;
+        return true;
     }
 
     private PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
@@ -117,6 +159,7 @@ public final class PokerTable {
         PlayerState player = requirePlayer(playerId);
         return handStartingTotals.getOrDefault(playerId, player.totalChips());
     }
+    public boolean participatedInHand(UUID playerId) { return handStartingTotals.containsKey(playerId); }
     public String handResult(UUID playerId) {
         requirePlayer(playerId);
         return handResults.getOrDefault(playerId, "LOSS");
@@ -199,7 +242,7 @@ public final class PokerTable {
     public synchronized PlayerState authenticate(UUID playerId, UUID reconnectToken) {
         PlayerState player = requirePlayer(playerId);
         if (reconnectToken == null || !player.reconnectToken().equals(reconnectToken))
-            throw new IllegalArgumentException("重连凭证无效，请重新加入牌桌");
+            throw new TableAccessException("INVALID_SESSION", "重连凭证无效，请重新加入牌桌");
         return player;
     }
 
@@ -477,7 +520,7 @@ public final class PokerTable {
 
     private void setCurrentTurnSeat(int seat) {
         currentTurnSeat = seat;
-        turnStartedAt = seat < 0 ? null : Instant.now();
+        turnStartedAt = seat < 0 ? null : clock.instant();
     }
 
     private void postBlind(PlayerState player, int blind) {
@@ -507,7 +550,7 @@ public final class PokerTable {
 
     private PlayerState requirePlayer(UUID playerId) {
         return players.stream().filter(player -> player.id().equals(playerId)).findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("玩家不存在"));
+                .orElseThrow(() -> new TableAccessException("SEAT_LEFT", "座位已释放，筹码已结算，可加入其他牌桌"));
     }
 
     private PlayerState playerAt(int seat) {

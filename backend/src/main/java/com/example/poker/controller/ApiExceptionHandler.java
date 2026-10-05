@@ -1,6 +1,7 @@
 package com.example.poker.controller;
 
 import com.example.poker.dto.TableViews;
+import com.example.poker.domain.TableAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -11,6 +12,12 @@ import java.time.Instant;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(TableAccessException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public TableViews.ErrorView handleTableAccess(TableAccessException exception) {
+        return new TableViews.ErrorView(exception.getMessage(), Instant.now(), exception.code());
+    }
+
     @ExceptionHandler({IllegalArgumentException.class, IllegalStateException.class})
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public TableViews.ErrorView handleBusiness(RuntimeException exception) {

@@ -28,7 +28,8 @@ public final class TableViews {
     public record PlayerView(UUID id, String nickname, int seat, int chips, int reserveChips, int totalChips,
                              int streetBet, int handBet,
                              String status, boolean ai, boolean dealer, boolean currentTurn, boolean canRaise,
-                             boolean winner, List<String> bestCards, List<String> cards) {}
+                             boolean winner, List<String> bestCards, List<String> cards,
+                             boolean leaving, boolean timedOut) {}
 
     public record TableView(UUID id, String name, int maxPlayers, boolean privateTable,
                             int totalChips, int minBuyIn, int defaultBuyIn, int maxBuyIn,
@@ -36,7 +37,7 @@ public final class TableViews {
                             GamePhase phase, String phaseLabel, long handNumber, int pot, int currentBet,
                             int minRaise, long actionDeadline, int actionTimeSeconds,
                             List<Integer> pots, String message,
-                            List<String> communityCards, List<PlayerView> players) {
+                            List<String> communityCards, List<PlayerView> players, long version) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
             List<PlayerView> playerViews = table.players().stream().map(player -> {
@@ -49,7 +50,8 @@ public final class TableViews {
                         player.streetBet(), player.handBet(), player.status().name(),
                         player.ai(), player.seat() == table.dealerSeat(), player.seat() == table.currentTurnSeat(),
                         player.raiseAllowed(), table.showdownWinner(player.id()),
-                        table.showdownBestCards(player.id()).stream().map(Card::toString).toList(), cards);
+                        table.showdownBestCards(player.id()).stream().map(Card::toString).toList(), cards,
+                        player.leaving(), player.timedOut());
             }).toList();
             return new TableView(table.id(), table.name(), table.maxPlayers(), table.privateTable(),
                     table.totalChips(), table.minBuyIn(), table.defaultBuyIn(), table.maxBuyIn(),
@@ -57,11 +59,12 @@ public final class TableViews {
                     table.phase(), table.phase().label(), table.handNumber(), table.pot(), table.currentBet(),
                     table.minRaise(), table.actionDeadlineEpochMillis(), table.actionTimeSeconds(),
                     table.pots(), table.message(),
-                    table.communityCards().stream().map(Card::toString).toList(), playerViews);
+                    table.communityCards().stream().map(Card::toString).toList(), playerViews, table.version());
         }
     }
 
     public record SessionView(UUID playerId, UUID reconnectToken, TableView table) {}
+    public record LeaveView(boolean pending, TableView table) {}
     public record AdminSettings(int totalChips, int minBuyIn, int defaultBuyIn, int maxBuyIn,
                                 int smallBlind, int bigBlind) {}
     public record StrategyAdvice(boolean available, double equity, double potOdds, double edge,
@@ -74,5 +77,7 @@ public final class TableViews {
             this(tableId, version, "TABLE_UPDATED", null, null, null, null);
         }
     }
-    public record ErrorView(String message, Instant timestamp) {}
+    public record ErrorView(String message, Instant timestamp, String code) {
+        public ErrorView(String message, Instant timestamp) { this(message, timestamp, null); }
+    }
 }
