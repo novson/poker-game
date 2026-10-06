@@ -585,7 +585,8 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 - **`currentTurn` 与服务端 `currentTurnSeat` 同步**：组件 watch `myTurn` 触发震动/声音；`handNumber` 变化时清空上局 `previousBets` 重新计筹码飞行。
 - **底牌可见性**：`TableViews.TableView.from()` 仅在 `viewerId == player.id` 或 `phase == SHOWDOWN && status != FOLDED` 时返回明牌，否则返回 `"??"`。前端 UI 必须按 `seat.player.cards[i] === '??'` 渲染背面。
 - **`actionClock`** 服务端 25s 倒计时；前端 200ms 轮询 `actionNow`；≤5s 进入 `urgent` 触发滴答音与震动。超时后服务端自动 CHECK/FOLD，客户端会收到新版本。
-- **跨设备登录**：登录码格式 `XXXX-XXXX-XXXX`（仅展示用），存储时去横杠大写。复制按钮使用 `navigator.clipboard.writeText`，失败需 toast 提示。
+- **跨设备登录**：登录码可为 4 位数字或 12 位字母数字，12 位展示为 `XXXX-XXXX-XXXX`（仅展示用），存储时去横杠大写。复制按钮使用 `navigator.clipboard.writeText`，失败需 toast 提示。
+- **开始下一局的补码确认**：`PokerRoom.startHand()` 先算 `topUpWaitPrompt(table)`（内部用 `playersNeedingTopUp`），有人桌上筹码为 0 且备用筹码够 `minBuyIn` 就弹 `window.confirm`：确定 → 立即开始，取消 → 本次不开局，留时间等 TA 补码。AI 座位（自己会补码）、已预约离桌、备用筹码不够最低买入的人都不算。判定必须留在 `services/rules.js` 里以便单测，不要写进组件。
 - **STOMP 重连**：`socket.js` 内部 `reconnectDelay=2000`，`onStompError`/`onWebSocketClose` 会把 `connected` 置 false，UI 显示"正在重连"。
 
 ### 5.1 一次状态变更的完整链路
