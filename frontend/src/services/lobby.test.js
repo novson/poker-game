@@ -18,6 +18,16 @@ it('accepts integer chips including amounts not divisible by the blind', () => {
 
 it('explains table availability without hiding occupied tables', () => {
   expect(tableAvailability({ phase: 'WAITING', playerCount: 6, maxPlayers: 6 }).label).toBe('已满座')
-  expect(tableAvailability({ phase: 'FLOP', playerCount: 2, maxPlayers: 6 }).label).toBe('牌局进行中')
+  expect(tableAvailability({ phase: 'FLOP', playerCount: 6, maxPlayers: 6 }).label).toBe('已满座')
   expect(tableAvailability({ phase: 'SHOWDOWN', playerCount: 2, maxPlayers: 6 }).available).toBe(true)
+})
+
+it('lets a player take a free seat while a hand is running', () => {
+  for (const phase of ['PRE_FLOP', 'FLOP', 'TURN', 'RIVER']) {
+    const state = tableAvailability({ phase, playerCount: 3, maxPlayers: 6 })
+    expect(state.available).toBe(true)
+    expect(state.label).toBe('入座（下一局）')
+  }
+  // 两手之间仍显示常规入座
+  expect(tableAvailability({ phase: 'WAITING', playerCount: 2, maxPlayers: 6 }).label).toBe('入座')
 })

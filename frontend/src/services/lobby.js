@@ -9,8 +9,11 @@ export function buyInState(rules, amount, balance = rules.totalChips) {
   return { minimum, maximum, message, valid: !message }
 }
 
+/**
+ * 牌局进行中也可以入座：只要还有空位，新人坐下后从下一局开始参与。
+ */
 export function tableAvailability(table) {
   if (table.playerCount >= table.maxPlayers) return { available: false, label: '已满座' }
-  if (!['WAITING', 'SHOWDOWN'].includes(table.phase)) return { available: false, label: '牌局进行中' }
+  if (!['WAITING', 'SHOWDOWN'].includes(table.phase)) return { available: true, label: '入座（下一局）' }
   return { available: true, label: '入座' }
 }

@@ -62,6 +62,8 @@ const canRaise = computed(() => validRaise(props.table, me.value, Number(raiseTo
 const allInAllowed = computed(() => canAllIn(props.table, me.value))
 const seats = computed(() => seatsFromViewer(props.table.players, props.table.maxPlayers, props.playerId))
 const betweenHands = computed(() => ['WAITING', 'SHOWDOWN'].includes(props.table.phase))
+// 牌局进行中入座的人：本手旁观，下一局才发牌
+const waitingForNextHand = computed(() => !betweenHands.value && me.value?.status === 'SITTING')
 const transferAmount = computed(() => Number(chipAmount.value) || 0)
 const canTopUp = computed(() => canTopUpAmount(props.table, me.value, transferAmount.value))
 const canCashOut = computed(() => {
@@ -497,6 +499,7 @@ onBeforeUnmount(() => {
         <span class="status-kicker">{{ myTurn ? 'YOUR ACTION' : betweenHands ? 'TABLE STATUS' : 'LIVE ACTION' }}</span>
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · {{ actionClock.seconds }} 秒 · 跟注额 {{ callAmount }}</small>
+        <small v-else-if="waitingForNextHand">你已入座，本手旁观，下一局开始参与</small>
         <small v-else-if="!canStart">{{ betweenHands ? '等待至少两名玩家准备好筹码' : '等待其他玩家行动' }}</small>
         <small v-else>{{ topUpWaiting.length ? `${topUpWaiting.join('、')} 桌上没筹码了，可等 TA 补码后再开始` : '至少两人即可开始下一局' }}</small>
       </div>
