@@ -85,7 +85,8 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 ### 3.2 牌桌状态机的边界
 - 牌桌修改使用 `PokerTable` 的 `synchronized` 方法。`PokerTable.access()` 将一次指令、AI 推进、账号结算、离桌清理和快照合并在同一个牌桌锁内；定时超时检查使用同一入口，**不允许**在 Controller / Service 重新加锁。
 - 阶段变更顺序：`WAITING → PRE_FLOP → FLOP → TURN → RIVER → SHOWDOWN → WAITING/SHOWDOWN`。
-- `SHOWDOWN` 期间仍允许补码/回收/重连/下一局；不允许 `join`/`act`。
+- `SHOWDOWN` 期间仍允许补码/回收/重连/下一局；不允许 `act`。
+- **局中入座**：只要有空位，任何阶段都可以 `join`。新玩家 `PlayerState.status = SITTING`，不进 `activePlayers()/contenders()`，所以本手不发牌、不行动、不进底池与边池结算，下一局 `start()` 才转为 `ACTIVE` 参与。牌桌 `message` 会提示“已入座，下一局开始参与”。已满座仍然拒绝。
 - 动作合法性入口：`PokerTable.act()` 一处统一校验，包括 `acted`/`streetBet`/`raiseAllowed`。
 - 新增动作类型（ActionType 枚举）必须同步更新：前端 `rules.js` 中 `validRaise/canAllIn/quickRaiseTo`、UI `PokerRoom.vue` 行动条、`PokerAiStrategy.decide`、`PokerAdvisor.advise`。
 
@@ -206,7 +207,7 @@ B=http://localhost:8080          # 以下所有示例的基点
 | GET | `/api/settings` | 公开 | 全局金额规则 |
 | GET | `/api/tables` | 公开 | 公开牌桌列表（不含私人桌） |
 | POST | `/api/tables` | 可选账号 | 创建牌桌（创建者自动入座） |
-| POST | `/api/tables/{id}/join` | 可选账号 | 加入公开牌桌 |
+| POST | `/api/tables/{id}/join` | 可选账号 | 加入公开牌桌（牌局进行中有空位也可，下一局参与） |
 | GET | `/api/tables/{id}` | `playerId+token` | 本玩家可见全量状态 |
 | GET | `/api/tables/{id}/advice` | `playerId+token` | 策略建议（仅私人 AI 桌） |
 | POST | `/api/tables/{id}/reconnect` | `playerId+token` | 重连，刷新 `reconnectToken` |
@@ -379,6 +380,8 @@ curl -X POST $B/api/tables/$TABLE_ID/join \
   -H 'Content-Type: application/json' \
   -d '{"nickname":"Bob","buyIn":2000,"accountId":"...","accountToken":"..."}'
 # → SessionView（结构同上，playerId/reconnectToken 换成 Bob 的）
+# 牌局进行中（PRE_FLOP…RIVER）也能入座，只要还有空位；返回的座位 status 是 SITTING，
+# 本手不发牌不行动，下一局 start() 才开始参与。满桌 → 400 {"message":"牌桌已满",...}
 
 # 3. 拉全量（每次 STOMP 推送后必调）——下面是开局打到翻牌后的完整结构
 curl "$B/api/tables/$TABLE_ID?playerId=$PID&reconnectToken=$RT"
