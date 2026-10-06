@@ -472,7 +472,7 @@ onBeforeUnmount(() => {
           @click="chipManagerOpen = !chipManagerOpen">{{ chipManagerOpen ? '收起' : '管理筹码' }}</button>
       </div>
       <div v-if="chipManagerOpen" class="bankroll-actions">
-        <label>调整金额<input v-model.number="chipAmount" type="number" min="1" :step="table.bigBlind" /></label>
+        <label>调整金额<input v-model.number="chipAmount" type="number" min="1" step="1" /></label>
         <button :disabled="busy || !connected || !canTopUp" @click="transfer('TOP_UP')">补码</button>
         <button :disabled="busy || !connected || !canCashOut" @click="transfer('CASH_OUT')">回收</button>
         <button class="cash-all" :disabled="busy || !connected || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>

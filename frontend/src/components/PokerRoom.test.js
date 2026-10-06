@@ -80,6 +80,23 @@ describe('starting the next hand', () => {
     expect(started).toHaveLength(0)
   })
 
+  it('accepts round chip amounts instead of blind-stepped ones', async () => {
+    // 桌上筹码低于最低带入时筹码面板会自动展开（bigBlind=50 → 旧实现的合法值是 1,51,101…）
+    mountRoom(tableWith([
+      seat('me', 'Alice', 0, { reserveChips: 50000 }),
+      seat('bob', 'Bob', 1500)
+    ]))
+    root.querySelector('.chip-manager-toggle').click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const field = [...root.querySelectorAll('.bankroll-actions label')]
+      .find(item => item.textContent.includes('调整金额'))
+    const input = field.querySelector('input')
+    expect(input.getAttribute('step')).toBe('1')
+    input.value = '5000'
+    expect(input.validity.stepMismatch).toBe(false)
+    expect(input.checkValidity()).toBe(true)
+  })
+
   it('does not bother the table when only an AI seat is empty', async () => {
     mountRoom(tableWith([
       seat('me', 'Alice', 2000),
