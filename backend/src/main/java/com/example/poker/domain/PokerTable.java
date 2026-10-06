@@ -186,15 +186,21 @@ public final class PokerTable {
 
     public synchronized PlayerState join(String nickname, Integer buyIn) {
         PlayerState player = addPlayer(null, nickname, false, buyIn == null ? startingChips : buyIn, totalChips);
-        message = nickname + " 加入了牌桌";
+        message = joinMessage(nickname);
         return player;
     }
 
     public synchronized PlayerState join(UUID accountId, String nickname, Integer buyIn, int bankroll) {
         int requestedBuyIn = buyIn == null ? startingChips : buyIn;
         PlayerState player = addPlayer(accountId, nickname, false, requestedBuyIn, bankroll);
-        message = nickname + " 加入了牌桌";
+        message = joinMessage(nickname);
         return player;
+    }
+
+    /** 牌局进行中入座要说明清楚：本手不参与，下一局才开始。 */
+    private String joinMessage(String nickname) {
+        if (phase == GamePhase.WAITING || phase == GamePhase.SHOWDOWN) return nickname + " 加入了牌桌";
+        return nickname + " 已入座，下一局开始参与";
     }
 
     public synchronized PlayerState joinAi(String nickname) {
@@ -205,8 +211,7 @@ public final class PokerTable {
     }
 
     private PlayerState addPlayer(UUID accountId, String nickname, boolean ai, int buyIn, int bankroll) {
-        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
-            throw new IllegalStateException("牌局进行中，暂不能加入");
+        // 牌局进行中也可以入座：新玩家状态是 SITTING，不参与当前这手牌，从下一局开始发牌
         if (players.size() >= maxPlayers) throw new IllegalStateException("牌桌已满");
         if (players.stream().anyMatch(player -> player.nickname().equalsIgnoreCase(nickname)))
             throw new IllegalArgumentException("昵称已被使用");

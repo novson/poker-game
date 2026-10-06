@@ -55,6 +55,33 @@ class TableServiceLifecycleTest {
     }
 
     @Test
+    void letsAnotherAccountTakeAFreeSeatWhileAHandIsRunning() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        Path file = directory.resolve("mid-hand-accounts.json");
+        AccountService accounts = new AccountService(mapper, settings, file);
+        var host = accounts.create("Host");
+        var late = accounts.create("Late");
+        TableService service = new TableService(mock(SimpMessagingTemplate.class), settings, accounts);
+
+        var first = service.create("进行中", "Host", host.accountId(), host.accountToken(), 4, false, 0, 2_000);
+        service.join(first.table().id(), "Second", 2_000);
+        var running = service.start(first.table().id(), first.playerId(), first.reconnectToken());
+        assertThat(running.phase().name()).isEqualTo("PRE_FLOP");
+
+        var joined = service.join(running.id(), "ignored", late.accountId(), late.accountToken(), 2_000);
+        var lateSeat = service.get(running.id(), joined.playerId(), joined.reconnectToken())
+                .players().stream().filter(player -> player.id().equals(joined.playerId()))
+                .findFirst().orElseThrow();
+        assertThat(lateSeat.status()).isEqualTo("SITTING");
+        assertThat(lateSeat.cards()).isEmpty();
+        assertThat(lateSeat.nickname()).isEqualTo("Late");
+        // 本手不受影响：牌桌消息说明下一局才参与
+        assertThat(service.get(running.id(), first.playerId(), first.reconnectToken()).message())
+                .contains("下一局");
+    }
+
+    @Test
     void removesAnEmptyPrivateTableAndBroadcastsClosure() {
         var messaging = mock(SimpMessagingTemplate.class);
         TableService service = new TableService(messaging);

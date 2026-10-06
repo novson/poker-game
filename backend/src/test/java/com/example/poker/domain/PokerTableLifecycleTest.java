@@ -41,6 +41,45 @@ class PokerTableLifecycleTest {
     }
 
     @Test
+    void seatsAPlayerDuringAHandAndDealsThemInFromTheNextHand() {
+        PlayerState alice = table.join("Alice");
+        table.join("Bob");
+        table.start(alice.id());
+        int potBeforeJoin = table.pot();
+        assertThat(table.phase()).isEqualTo(GamePhase.PRE_FLOP);
+
+        PlayerState carol = table.join("Carol");
+        assertThat(carol.status()).isEqualTo(PlayerStatus.SITTING);
+        assertThat(carol.holeCards()).isEmpty();
+        assertThat(table.pot()).isEqualTo(potBeforeJoin);
+        assertThat(table.currentPlayer().id()).isNotEqualTo(carol.id());
+        assertThat(table.message()).contains("下一局");
+
+        // 本手照常在原有两人之间进行
+        while (table.phase() != GamePhase.SHOWDOWN) {
+            PlayerState current = table.currentPlayer();
+            table.act(current.id(), ActionType.FOLD, null);
+        }
+        assertThat(carol.status()).isEqualTo(PlayerStatus.SITTING);
+        assertThat(carol.holeCards()).isEmpty();
+
+        // 下一局开始参与
+        table.start(alice.id());
+        assertThat(carol.status()).isEqualTo(PlayerStatus.ACTIVE);
+        assertThat(carol.holeCards()).hasSize(2);
+        assertThat(table.players()).hasSize(3);
+    }
+
+    @Test
+    void stillRefusesASeatWhenTheTableIsFullMidHand() {
+        PlayerState alice = table.join("Alice");
+        table.join("Bob");
+        table.join("Carol");
+        table.start(alice.id());
+        assertThatThrownBy(() -> table.join("Dave")).hasMessageContaining("牌桌已满");
+    }
+
+    @Test
     void rejectsAnUnauthenticatedLeaveAndCanLeaveBeforeTheFirstHand() {
         PlayerState alice = table.join("Alice");
         assertThatThrownBy(() -> table.requestLeave(alice.id(), UUID.randomUUID()))
