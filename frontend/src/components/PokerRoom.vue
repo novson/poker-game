@@ -4,7 +4,7 @@ import PlayingCard from './PlayingCard.vue'
 import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
-  minimumRaiseTo, quickRaiseTo, validRaise } from '../services/rules'
+  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, topUpWaitPrompt, validRaise } from '../services/rules'
 import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
 import { seatsFromViewer } from '../services/tableView'
 import { roomLayout } from '../services/roomLayout'
@@ -55,6 +55,8 @@ const me = computed(() => props.table.players.find(player => player.id === props
 const myTurn = computed(() => me.value?.currentTurn)
 const callAmount = computed(() => getCallAmount(props.table, me.value))
 const canStart = computed(() => getCanStart(props.table))
+const topUpWaiting = computed(() => playersNeedingTopUp(props.table)
+  .map(player => player.nickname || '未知玩家'))
 const minRaiseTo = computed(() => minimumRaiseTo(props.table))
 const canRaise = computed(() => validRaise(props.table, me.value, Number(raiseTo.value)))
 const allInAllowed = computed(() => canAllIn(props.table, me.value))
@@ -184,6 +186,9 @@ function quickRaise(amount) {
 function startHand() {
   if (props.busy || !props.connected) return
   clearAutoTimer()
+  // 有人桌上没筹码时先确认一次：确定立即开始，取消则留时间等 TA 补码
+  const prompt = topUpWaitPrompt(props.table)
+  if (prompt && !window.confirm(prompt)) return
   emit('start')
 }
 
@@ -493,7 +498,7 @@ onBeforeUnmount(() => {
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · {{ actionClock.seconds }} 秒 · 跟注额 {{ callAmount }}</small>
         <small v-else-if="!canStart">{{ betweenHands ? '等待至少两名玩家准备好筹码' : '等待其他玩家行动' }}</small>
-        <small v-else>至少两人即可开始下一局</small>
+        <small v-else>{{ topUpWaiting.length ? `${topUpWaiting.join('、')} 桌上没筹码了，可等 TA 补码后再开始` : '至少两人即可开始下一局' }}</small>
       </div>
       <div v-if="myTurn" class="actions" aria-label="牌局操作">
         <button class="danger action-fold" :class="{ recommended: advice?.recommendedAction === 'FOLD' }" :disabled="busy || !connected" @click="act('FOLD')">弃牌</button>

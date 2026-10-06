@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { callAmount, canAllIn, canAutoStartNextHand, canStart, minimumRaiseTo, quickRaiseTo, validRaise } from './rules'
+import { callAmount, canAllIn, canAutoStartNextHand, canStart, minimumRaiseTo,
+  playersNeedingTopUp, quickRaiseTo, topUpWaitPrompt, validRaise } from './rules'
 
 describe('poker action rules', () => {
   const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{ chips: 1000 }, { chips: 1000 }] }
@@ -30,6 +31,45 @@ describe('poker action rules', () => {
       players: [{ chips: 100 }, { chips: 0, ai: true, reserveChips: 900 }] })).toBe(false)
     expect(canStart({ ...table, phase: 'SHOWDOWN', minBuyIn: 1000,
       players: [{ chips: 100 }, { chips: 0, ai: true, reserveChips: 1000 }] })).toBe(true)
+  })
+
+  it('spots human players who are out of table chips but can still top up', () => {
+    const base = { phase: 'SHOWDOWN', minBuyIn: 1000, players: [
+      { id: 'me', nickname: 'Alice', chips: 2000, reserveChips: 0 },
+      { id: 'bob', nickname: 'Bob', chips: 1500, reserveChips: 0 }
+    ] }
+    expect(playersNeedingTopUp(base)).toEqual([])
+    expect(topUpWaitPrompt(base)).toBeNull()
+
+    expect(playersNeedingTopUp({ ...base, players: [...base.players,
+      { id: 'carl', nickname: 'Carl', chips: 0, reserveChips: 5000 }] })
+      .map(player => player.id)).toEqual(['carl'])
+
+    // 备用筹码不够最低买入 → 等也补不进来，不提示
+    expect(playersNeedingTopUp({ ...base, players: [...base.players,
+      { id: 'carl', nickname: 'Carl', chips: 0, reserveChips: 400 }] })).toEqual([])
+
+    // AI 自己会补码；已预约离桌的人不再等
+    expect(playersNeedingTopUp({ ...base, players: [...base.players,
+      { id: 'ai', nickname: '机器人', chips: 0, reserveChips: 5000, ai: true }] })).toEqual([])
+    expect(playersNeedingTopUp({ ...base, players: [...base.players,
+      { id: 'carl', nickname: 'Carl', chips: 0, reserveChips: 5000, leaving: true }] })).toEqual([])
+
+    expect(playersNeedingTopUp(null)).toEqual([])
+    expect(playersNeedingTopUp({})).toEqual([])
+  })
+
+  it('builds the confirm copy for players who still need to top up', () => {
+    const table = { phase: 'SHOWDOWN', minBuyIn: 1000, players: [
+      { id: 'me', nickname: 'Alice', chips: 2000 },
+      { id: 'carl', nickname: 'Carl', chips: 0, reserveChips: 5000 },
+      { id: 'dora', nickname: 'Dora', chips: 0, reserveChips: 3000 }
+    ] }
+    const prompt = topUpWaitPrompt(table)
+    expect(prompt).toContain('Carl、Dora')
+    expect(prompt).toContain('确定')
+    expect(prompt).toContain('取消')
+    expect(topUpWaitPrompt({ ...table, players: table.players.slice(0, 1) })).toBeNull()
   })
 
   it('builds legal half-pot and pot-size raises', () => {

@@ -36,6 +36,29 @@ export function quickRaiseTo(table, player, fraction) {
   return Math.min(maximum, Math.max(minimum, target))
 }
 
+/**
+ * 桌上筹码为 0、且手里还有备用筹码可以补码的真人玩家。
+ * AI 会自己补码、已预约离桌的人不算，备用筹码不足最低买入的等了也补不进来。
+ */
+export function playersNeedingTopUp(table) {
+  if (!table?.players) return []
+  const minimumStack = Number(table.minBuyIn) || 0
+  return table.players.filter(player => !player.ai && !player.leaving
+    && (player.chips || 0) <= 0 && (player.reserveChips || 0) >= minimumStack)
+}
+
+/**
+ * 开始下一局前的确认文案：有人还没补码时返回提示，否则返回 null（直接开始）。
+ * 确定 = 立即开始；取消 = 留时间给 TA 补码。
+ */
+export function topUpWaitPrompt(table) {
+  const waiting = playersNeedingTopUp(table)
+  if (!waiting.length) return null
+  const names = waiting.map(player => player.nickname || '未知玩家').join('、')
+  return `${names} 桌上已经没有筹码，是否仍要开始下一局？\n\n` +
+    '点“确定”立即开始（TA 补码后才能参与下一局），点“取消”等 TA 补码。'
+}
+
 export function canAutoStartNextHand(table, player) {
   if (!table?.privateTable || table.phase !== 'SHOWDOWN' || !player || player.leaving || player.timedOut) return false
   if ((player.chips || 0) < (table.minBuyIn || 0)) return false
