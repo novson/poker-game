@@ -97,6 +97,16 @@ describe('starting the next hand', () => {
     expect(input.checkValidity()).toBe(true)
   })
 
+  it('tells a player who joined mid-hand that they start next hand', async () => {
+    mountRoom(tableWith([
+      seat('me', 'Alice', 0, { reserveChips: 50000, status: 'SITTING' }),
+      seat('bob', 'Bob', 1500, { status: 'ACTIVE' }),
+      seat('carl', 'Carl', 1500, { status: 'ACTIVE' })
+    ], { phase: 'FLOP', currentBet: 50 }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(root.querySelector('.status-copy').textContent).toContain('下一局开始参与')
+  })
+
   it('does not bother the table when only an AI seat is empty', async () => {
     mountRoom(tableWith([
       seat('me', 'Alice', 2000),
