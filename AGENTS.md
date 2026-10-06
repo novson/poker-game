@@ -821,7 +821,12 @@ mvn -B spring-boot:run
 `pkill -f poker-backend-1.0.0.jar` 会连**正在执行这条命令的 ssh/bash 自身**一起杀掉（它的命令行里就含这个字符串），表现为 ssh 直接断连、输出丢失、退出码 255。
 正确做法：先单独一次 `ps -eo pid,args | grep '[p]oker-backend'` 拿到 PID，再 `kill <pid>`；或分两条 ssh 命令执行。
 
-### 13.10 推送到 GitHub 走不通 `git push` 时的退路
+### 13.10 金额输入框不要绑 `step=bigBlind`
+HTML `<input type=number>` 的 `step` 校验基准是 `min`，不是 0。曾经给「最低/默认/最高带入」和「调整金额」写了
+`min="1" :step="table.bigBlind"`，大盲 50 时合法值变成 `1,51,101…`，想填 5000 会被浏览器拦下并提示“最接近的有效值为 4951 和 5001”
+—— 连内置预设 5000/10000/20000 都存不进去。金额类输入统一 `step="1"`（任意整数），规则校验交给服务端 `PokerSettings.validate()`。
+
+### 13.11 推送到 GitHub 走不通 `git push` 时的退路
 本机到 `github.com:443` 常被代理拦掉（`CONNECT tunnel failed, response 502`），但 `api.github.com` 可用：用 `gh auth token` + Git Data API（blob → tree → commit → 更新 ref）提交。
 **注意**：必须从 git 对象库取内容（`git cat-file blob $(git rev-parse HEAD:<path>)`），不要直接读工作区文件——Windows 工作区是 CRLF，直接上传会把仓库里的 LF 全改成 CRLF。
 
