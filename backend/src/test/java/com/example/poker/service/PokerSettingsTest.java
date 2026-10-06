@@ -35,6 +35,21 @@ class PokerSettingsTest {
     }
 
     @Test
+    void acceptsRoundBuyInNumbersThatAreNotBlindSteps() {
+        PokerSettings settings = new PokerSettings(directory.resolve("round-numbers.properties"));
+        // 25/50 的牌桌：最低 5000、默认 10000、最高 20000 —— 都是整数，不必是大盲的某种奇数偏移
+        PokerSettings.Values round = new PokerSettings.Values(50_000, 5_000, 10_000, 20_000, 25, 50);
+
+        assertThat(settings.update(round)).isEqualTo(round);
+        assertThat(new PokerSettings(directory.resolve("round-numbers.properties")).values())
+                .isEqualTo(round);
+
+        // 边界：最低带入正好 20 个大盲是允许的
+        assertThat(settings.update(new PokerSettings.Values(50_000, 1_000, 10_000, 20_000, 25, 50))
+                .minBuyIn()).isEqualTo(1_000);
+    }
+
+    @Test
     void migratesLegacyStartingChipsToTotalBankroll() throws IOException {
         Path file = directory.resolve("legacy.properties");
         Files.writeString(file, "startingChips=200000\n");
