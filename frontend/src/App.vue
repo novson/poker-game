@@ -776,14 +776,14 @@ onBeforeUnmount(() => {
           <div class="money-settings-grid">
             <label>小盲<input v-model.number="adminSettings.smallBlind" type="number" min="1" max="99999" step="1" /></label>
             <label>大盲<input v-model.number="adminSettings.bigBlind" type="number" min="2" max="100000" step="1" /></label>
-            <label>最低带入<input v-model.number="adminSettings.minBuyIn" type="number" min="1" max="10000000" :step="adminSettings.bigBlind || 1" /></label>
-            <label>默认带入<input v-model.number="adminSettings.defaultBuyIn" type="number" min="1" max="10000000" :step="adminSettings.bigBlind || 1" /></label>
-            <label>最高带入<input v-model.number="adminSettings.maxBuyIn" type="number" min="1" max="10000000" :step="adminSettings.bigBlind || 1" /></label>
-            <label>单次总筹码<input v-model.number="adminSettings.totalChips" type="number" min="100" max="10000000" :step="adminSettings.bigBlind || 1" /></label>
+            <label>最低带入<input v-model.number="adminSettings.minBuyIn" type="number" min="1" max="10000000" step="1" /></label>
+            <label>默认带入<input v-model.number="adminSettings.defaultBuyIn" type="number" min="1" max="10000000" step="1" /></label>
+            <label>最高带入<input v-model.number="adminSettings.maxBuyIn" type="number" min="1" max="10000000" step="1" /></label>
+            <label>单次总筹码<input v-model.number="adminSettings.totalChips" type="number" min="100" max="10000000" step="1" /></label>
           </div>
           <div class="money-guide">
             <strong>当前相当于：最低 {{ settingsRatios.minimum }}BB · 默认 {{ settingsRatios.defaultValue }}BB · 最高 {{ settingsRatios.maximum }}BB · 总额度 {{ settingsRatios.bankroll }}BB</strong>
-            <small>推荐：小盲约为大盲一半；最低 50BB、默认 100BB、最高 200BB；单次总额度至少准备 5 个默认买入。系统最低允许 20BB。</small>
+            <small>推荐：小盲约为大盲一半；最低 50BB、默认 100BB、最高 200BB；单次总额度至少准备 5 个默认买入。系统最低允许 20BB。金额可填任意整数（不必是大盲的整数倍），点保存后由服务端校验。</small>
           </div>
         </form>
         <div class="admin-table-title"><strong>全部牌桌</strong><span>{{ adminTables.length }} 张</span></div>
