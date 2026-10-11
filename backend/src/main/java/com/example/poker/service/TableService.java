@@ -6,6 +6,7 @@ import com.example.poker.domain.PlayerState;
 import com.example.poker.domain.PlayerStatus;
 import com.example.poker.domain.PokerTable;
 import com.example.poker.domain.TableAccessException;
+import com.example.poker.dto.AccountViews;
 import com.example.poker.dto.TableViews;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -234,6 +235,29 @@ public class TableService {
 
     public TableViews.AdminSettings updateSettings(PokerSettings.Values values) {
         return settingsView(settings.update(values));
+    }
+
+    /**
+     * 把全部账号筹码改成同一个值。已入座的账号先在牌桌锁内改桌上/备用筹码，
+     * 否则下一次结算会用旧的座位总额把账号余额写回去。
+     */
+    public List<AccountViews.AdminAccount> resetAllAccountChips(int chips) {
+        if (chips < 0 || chips > 10_000_000)
+            throw new IllegalArgumentException("账号筹码必须在 0 到 10,000,000 之间");
+        for (PokerTable table : tables.values()) {
+            table.access(() -> {
+                if (tables.get(table.id()) != table) return null;
+                boolean changed = false;
+                for (PlayerState player : table.players()) {
+                    if (player.ai() || player.accountId() == null) continue;
+                    changed |= table.resetAccountBankroll(player.accountId(), chips);
+                }
+                if (changed) publish(table.id());
+                return null;
+            });
+        }
+        accounts.adminSetAllChips(chips);
+        return accounts.adminList();
     }
 
     public TableViews.TableView topUp(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {

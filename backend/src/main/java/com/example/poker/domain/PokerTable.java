@@ -263,6 +263,21 @@ public final class PokerTable {
         message = player.nickname() + " 补码 " + amount;
     }
 
+    /** 把已入座账号的总筹码改成 total。没找到该账号时返回 false。 */
+    public synchronized boolean resetAccountBankroll(UUID accountId, int total) {
+        if (accountId == null) return false;
+        PlayerState player = players.stream()
+                .filter(candidate -> accountId.equals(candidate.accountId()))
+                .findFirst().orElse(null);
+        if (player == null || player.ai()) return false;
+        boolean betweenHands = phase == GamePhase.WAITING || phase == GamePhase.SHOWDOWN;
+        player.replaceTotal(total, betweenHands, startingChips, maxBuyIn);
+        if (handStartingTotals.containsKey(player.id()))
+            handStartingTotals.put(player.id(), player.totalChips());
+        message = "管理员已将账号筹码调整为 " + total;
+        return true;
+    }
+
     public synchronized void cashOut(UUID playerId, int amount) {
         ensureBetweenHands();
         PlayerState player = requirePlayer(playerId);

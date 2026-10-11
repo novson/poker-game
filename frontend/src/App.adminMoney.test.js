@@ -7,7 +7,7 @@ import { api } from './services/api'
 vi.mock('./services/api', () => ({ api: {
   settings: vi.fn(), listTables: vi.fn(), adminSettings: vi.fn(), adminTables: vi.fn(),
   adminAccounts: vi.fn(), updateAdminSettings: vi.fn(), deleteAdminTable: vi.fn(),
-  deleteAdminAccount: vi.fn(), updateAdminAccount: vi.fn()
+  deleteAdminAccount: vi.fn(), updateAdminAccount: vi.fn(), updateAllAdminChips: vi.fn()
 } }))
 vi.mock('./services/socket', () => ({ watchTable: vi.fn(() => () => {}) }))
 
@@ -84,4 +84,33 @@ it('saves the deep stack preset with round 5000/10000/20000 numbers', async () =
     totalChips: 50000, minBuyIn: 5000, defaultBuyIn: 10000, maxBuyIn: 20000,
     smallBlind: 25, bigBlind: 50
   })
+})
+
+it('updates every account chip balance from the admin panel', async () => {
+  api.adminAccounts.mockResolvedValue([
+    { id: 'a', nickname: 'Ann', chips: 100, hands: 0 },
+    { id: 'b', nickname: 'Bob', chips: 200, hands: 0 }
+  ])
+  api.updateAllAdminChips.mockResolvedValue([
+    { id: 'a', nickname: 'Ann', chips: 9000, hands: 0 },
+    { id: 'b', nickname: 'Bob', chips: 9000, hands: 0 }
+  ])
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  await openAdminPanel()
+
+  const field = [...root.querySelectorAll('.admin-bulk-chips label')]
+    .find(item => item.textContent.includes('统一筹码'))
+  const input = field.querySelector('input')
+  expect(input.getAttribute('step')).toBe('1')
+  expect(Number(input.value)).toBe(50000)
+  input.value = '9000'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await settle()
+  root.querySelector('.admin-bulk-chips button').click()
+  await settle()
+
+  expect(window.confirm).toHaveBeenCalled()
+  expect(api.updateAllAdminChips).toHaveBeenCalledWith('88914752', 9000)
+  expect(root.textContent).toContain('已将 2 个账号的筹码更新为 9000')
+  expect(root.textContent).toContain('9000 筹码')
 })
