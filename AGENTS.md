@@ -833,10 +833,22 @@ mvn -B spring-boot:run
 `pkill -f poker-backend-1.0.0.jar` 会连**正在执行这条命令的 ssh/bash 自身**一起杀掉（它的命令行里就含这个字符串），表现为 ssh 直接断连、输出丢失、退出码 255。
 正确做法：先单独一次 `ps -eo pid,args | grep '[p]oker-backend'` 拿到 PID，再 `kill <pid>`；或分两条 ssh 命令执行。
 
+**按用户过滤同样不安全**：生产进程是 `runuser -u poker -- ... java -jar`，其中 `runuser` 父进程**属于 root**，
+只有 java 子进程属于 `poker`。于是 `pgrep -u root -f <jar 名>` 会同时命中 root 的 runuser 父进程**和**自己的 ssh/bash，
+一次误杀就把生产带上；`pgrep -u poker -f java` 才是安全的（自己的 shell 是 bash 不是 java）。
+要区分「生产实例」和「临时冒烟实例」时，别用命令行/用户猜——**启动时把 `$!` 写进 PID 文件，收尾按 PID 文件 kill**。
+
 ### 13.10 金额输入框不要绑 `step=bigBlind`
 HTML `<input type=number>` 的 `step` 校验基准是 `min`，不是 0。曾经给「最低/默认/最高带入」和「调整金额」写了
 `min="1" :step="table.bigBlind"`，大盲 50 时合法值变成 `1,51,101…`，想填 5000 会被浏览器拦下并提示“最接近的有效值为 4951 和 5001”
 —— 连内置预设 5000/10000/20000 都存不进去。金额类输入统一 `step="1"`（任意整数），规则校验交给服务端 `PokerSettings.validate()`。
+
+### 13.12 会改线上真实数据的功能，冒烟要起隔离实例
+像「管理员一键把所有账号筹码设成同一个值」这种**一发请求就改全表**的接口，绝不能拿生产的 `accounts.json` 试
+（线上账号是真人玩家的余额）。做法：用同一个 jar 在服务器本机另起一个临时实例——`SERVER_PORT=18081`、
+`SERVER_ADDRESS=127.0.0.1`、`STATE_DIRECTORY=/tmp/xxx`（账号文件随之落在这个空目录），
+冒烟脚本（`python3`，见 `.workbuddy/smoke_*.py`）打 18081；跑完按 PID 文件停掉并 `rm -rf` 临时目录。
+生产侧只做**只读**核对：`/actuator/health`、`GET /api/admin/accounts` 条数、`GET /api/tables`、nginx 首页 assets 文件名。
 
 ### 13.11 推送到 GitHub 走不通 `git push` 时的退路
 本机到 `github.com:443` 常被代理拦掉（`CONNECT tunnel failed, response 502`），但 `api.github.com` 可用：用 `gh auth token` + Git Data API（blob → tree → commit → 更新 ref）提交。
