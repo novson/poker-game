@@ -61,6 +61,7 @@ const adminTables = ref([])
 const adminAccounts = ref([])
 const accountEdits = ref({})
 const adminMessage = ref('')
+const bulkChips = ref(tableSettings.value.totalChips)
 const moneyPresets = [
   { name: '入门 1/2', totalChips: 1000, minBuyIn: 100, defaultBuyIn: 200, maxBuyIn: 400, smallBlind: 1, bigBlind: 2 },
   { name: '标准 10/20', totalChips: 10000, minBuyIn: 1000, defaultBuyIn: 2000, maxBuyIn: 4000, smallBlind: 10, bigBlind: 20 },
@@ -557,6 +558,7 @@ async function authenticateAdmin() {
   if (!result) return
   adminSettings.value = result[0]
   adminTables.value = result[1]
+  bulkChips.value = result[0].totalChips
   applyAccountList(result[2] || [])
   adminAuthenticated.value = true
   sessionStorage.setItem('poker.adminToken', adminToken.value)
@@ -596,6 +598,25 @@ async function saveAdminAccount(item) {
   adminMessage.value = updated.loginCode
     ? `已保存 ${nickname}，新登录码 ${updated.loginCode}（仅此一次显示）`
     : `已保存 ${nickname}`
+}
+
+async function updateAllAccountChips() {
+  const chips = bulkChips.value
+  if (!Number.isInteger(chips) || chips < 0 || chips > 10_000_000) {
+    adminMessage.value = '筹码必须是 0 到 10,000,000 的整数'
+    return
+  }
+  const count = adminAccounts.value.length
+  if (!count) {
+    adminMessage.value = '当前没有账号'
+    return
+  }
+  if (!window.confirm(`确定把全部 ${count} 个账号的筹码都改为 ${chips} 吗？已入座的玩家会同步调整。`)) return
+  const list = await run(() => api.updateAllAdminChips(adminToken.value, chips))
+  if (!list) return
+  applyAccountList(list)
+  adminMessage.value = `已将 ${list.length} 个账号的筹码更新为 ${chips}`
+  if (accountSession.value) loadAccountProfile(true)
 }
 
 async function removeAdminAccount(item) {
@@ -795,6 +816,15 @@ onBeforeUnmount(() => {
         </div>
         <p v-else class="admin-empty">当前没有牌桌</p>
         <div class="admin-table-title"><strong>账号管理</strong><span>{{ adminAccounts.length }} 个</span></div>
+        <form class="admin-bulk-chips" @submit.prevent="updateAllAccountChips">
+          <div class="admin-bulk-row">
+            <label>统一筹码
+              <input v-model.number="bulkChips" type="number" min="0" max="10000000" step="1" />
+            </label>
+            <button class="gold" type="submit" :disabled="busy || !adminAccounts.length">更新全部账号</button>
+          </div>
+          <small>把每个账号改成这个筹码。两局之间按该桌默认带入重新分配桌上与备用筹码；牌局进行中保留桌上筹码，差额记入备用。</small>
+        </form>
         <p v-if="adminMessage" class="admin-notice">{{ adminMessage }}</p>
         <div v-if="adminAccounts.length" class="admin-account-list">
           <article v-for="item in adminAccounts" :key="item.id">

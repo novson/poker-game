@@ -118,6 +118,20 @@ public class AccountService {
                 loginCode == null ? null : formatLoginCode(loginCode));
     }
 
+    /** 把每个账号的筹码设成同一个值，并落盘一次。 */
+    public synchronized int adminSetAllChips(int chips) {
+        if (chips < 0 || chips > 10_000_000)
+            throw new IllegalArgumentException("账号筹码必须在 0 到 10,000,000 之间");
+        if (accounts.isEmpty()) return 0;
+        Instant now = Instant.now();
+        for (StoredAccount account : List.copyOf(accounts.values())) {
+            accounts.put(account.id(), new StoredAccount(account.id(), account.token(), account.nickname(), chips,
+                    account.loginCodeHash(), account.createdAt(), now, account.hands()));
+        }
+        persist();
+        return accounts.size();
+    }
+
     public synchronized void adminDelete(UUID accountId) {
         require(accountId);
         accounts.remove(accountId);

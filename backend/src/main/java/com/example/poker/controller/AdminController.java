@@ -93,6 +93,15 @@ public class AdminController {
         return accountService.adminUpdate(accountId, request.nickname(), request.chips(), request.loginCode());
     }
 
+    /** 把每个账号的筹码设成同一个值，并同步已入座玩家的桌上/备用筹码。 */
+    @PutMapping("/accounts/chips")
+    public List<AccountViews.AdminAccount> updateAllChips(
+            @RequestHeader(value = "X-Admin-Token", required = false) String token,
+            @Valid @RequestBody Requests.AdminSetAllChips request) {
+        authorize(token);
+        return service.resetAllAccountChips(request.chips());
+    }
+
     /** 删除账号；若账号仍在牌局中则拒绝，避免牌局结算时找不到账号。 */
     @DeleteMapping("/accounts/{accountId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)

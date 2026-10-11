@@ -228,6 +228,7 @@ B=http://localhost:8080          # 以下所有示例的基点
 | DELETE | `/api/admin/tables/{id}` | `X-Admin-Token` | 管理员强制删除牌桌 |
 | GET | `/api/admin/accounts` | `X-Admin-Token` | 管理员列出账号（不含凭证） |
 | PATCH | `/api/admin/accounts/{id}` | `X-Admin-Token` | 改昵称/筹码/登录码（均可省略） |
+| PUT | `/api/admin/accounts/chips` | `X-Admin-Token` | 把全部账号筹码设成同一个值，并同步已入座玩家 |
 | DELETE | `/api/admin/accounts/{id}` | `X-Admin-Token` | 删除账号（在座时拒绝） |
 | GET | `/actuator/health` | 公开 | Docker 健康检查 |
 
@@ -529,6 +530,14 @@ curl -X PATCH $B/api/admin/accounts/$ID \
 # → {"account":{...同上...},"loginCode":"ADMI-NSET-1234"}
 #   仅当本次设置了 loginCode 才回文明文（服务端只存散列），否则 loginCode 为 null
 # 昵称重复 → 400；chips 范围 0..10_000_000
+
+# 一键把全部账号筹码改成同一个值（已入座玩家会同步调整桌上/备用筹码）
+curl -X PUT $B/api/admin/accounts/chips \
+  -H 'Content-Type: application/json' -H "X-Admin-Token: $ADMIN" \
+  -d '{"chips":10000}'
+# → [ AdminAccount, ... ] 与列出账号相同
+# 两局之间按该桌默认带入重新分配；牌局进行中保留桌上筹码，差额记入备用
+# 游客座位没有账号，不受影响
 
 # 删除账号：账号仍在牌局中会被拒绝，需先让其离桌或删除牌桌
 curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"

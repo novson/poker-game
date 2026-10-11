@@ -101,6 +101,28 @@ public final class PlayerState {
         sit();
     }
 
+    /**
+     * 管理员把该座位的桌上筹码与备用筹码之和改成 total。
+     * 两局之间按默认带入重新落座；牌局进行中不增桌上筹码，避免中途改写已下注的行动栈。
+     */
+    public void replaceTotal(int total, boolean betweenHands, int tableBuyIn, int maxOnTable) {
+        if (total < 0 || total > 10_000_000)
+            throw new IllegalArgumentException("账号筹码必须在 0 到 10,000,000 之间");
+        if (betweenHands) {
+            int onTable = Math.min(total, Math.min(maxOnTable, Math.max(tableBuyIn, 0)));
+            chips = onTable;
+            reserveChips = total - onTable;
+            streetBet = 0;
+            handBet = 0;
+            sit();
+            return;
+        }
+        int kept = Math.min(chips, total);
+        chips = kept;
+        reserveChips = total - kept;
+        if (chips == 0 && status == PlayerStatus.ACTIVE) status = PlayerStatus.ALL_IN;
+    }
+
     public int pay(int amount) {
         if (amount < 0 || amount > chips) throw new IllegalArgumentException("筹码不足");
         chips -= amount;

@@ -50,6 +50,14 @@ describe('admin account management', () => {
     expect(JSON.parse(calls[0].options.body)).toEqual({ loginCode: 'ADMINSET1234' })
   })
 
+  it('sets every account to the same chip total', async () => {
+    await api.updateAllAdminChips('admin-token', 9000)
+    expect(calls[0].url).toBe('/api/admin/accounts/chips')
+    expect(calls[0].options.method).toBe('PUT')
+    expect(calls[0].options.headers['X-Admin-Token']).toBe('admin-token')
+    expect(JSON.parse(calls[0].options.body)).toEqual({ chips: 9000 })
+  })
+
   it('deletes an account', async () => {
     await api.deleteAdminAccount('admin-token', 'acc-1')
     expect(calls[0].url).toBe('/api/admin/accounts/acc-1')

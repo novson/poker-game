@@ -89,6 +89,10 @@ export const api = {
     method: 'PATCH', headers: { ...jsonHeaders, 'X-Admin-Token': token },
     body: JSON.stringify(patch)
   }),
+  updateAllAdminChips: (token, chips) => request('/api/admin/accounts/chips', {
+    method: 'PUT', headers: { ...jsonHeaders, 'X-Admin-Token': token },
+    body: JSON.stringify({ chips })
+  }),
   deleteAdminAccount: (token, accountId) => request(`/api/admin/accounts/${accountId}`, {
     method: 'DELETE', headers: { 'X-Admin-Token': token }
   })

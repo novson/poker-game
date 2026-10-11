@@ -24,6 +24,9 @@ public final class Requests {
                                      @Min(0) @Max(10_000_000) Integer chips,
                                      @Size(max = 16) String loginCode) {}
 
+    /** 把每个账号的筹码设成同一个值。 */
+    public record AdminSetAllChips(@NotNull @Min(0) @Max(10_000_000) Integer chips) {}
+
     public record CreateTable(
             @NotBlank @Size(max = 30) String tableName,
             @NotBlank @Size(max = 16) String nickname,
