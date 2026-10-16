@@ -48,6 +48,9 @@ public final class Requests {
                                @NotBlank @Size(max = 24) String emoteId) {}
     public record PlayerAction(@NotNull UUID playerId, @NotNull UUID reconnectToken,
                                @NotNull ActionType type, Integer raiseTo) {}
+
+    /** 开关本局试算；open 省略视为 false（收起）。 */
+    public record SettlementCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken, Boolean open) {}
     public record UpdateSettings(
             @Min(100) @Max(10_000_000) int totalChips,
             @Min(1) @Max(10_000_000) int minBuyIn,

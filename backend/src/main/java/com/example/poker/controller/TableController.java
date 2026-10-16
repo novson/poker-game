@@ -73,6 +73,13 @@ public class TableController {
                 request.type(), request.raiseTo());
     }
 
+    @PostMapping("/{tableId}/settlement")
+    public TableViews.TableView settlement(@PathVariable UUID tableId,
+                                           @Valid @RequestBody Requests.SettlementCommand request) {
+        return service.setSettlement(tableId, request.playerId(), request.reconnectToken(),
+                Boolean.TRUE.equals(request.open()));
+    }
+
     @PostMapping("/{tableId}/chips/top-up")
     public TableViews.TableView topUp(@PathVariable UUID tableId,
                                       @Valid @RequestBody Requests.ChipCommand request) {

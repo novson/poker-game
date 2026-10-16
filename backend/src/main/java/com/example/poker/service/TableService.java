@@ -219,6 +219,16 @@ public class TableService {
         });
     }
 
+    /** 本局试算：创建人开关，打开后牌桌视图里所有人都能看到盈亏与转账方案。 */
+    public TableViews.TableView setSettlement(UUID tableId, UUID playerId, UUID reconnectToken, boolean open) {
+        return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            table.setSettlementOpen(playerId, open);
+            publish(tableId);
+            return TableViews.TableView.from(table, playerId);
+        });
+    }
+
     public TableViews.TableView act(UUID tableId, UUID playerId, UUID reconnectToken,
                                     ActionType type, Integer raiseTo) {
         return withTable(tableId, table -> {

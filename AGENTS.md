@@ -97,6 +97,17 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 - `topUp/cashOut` 只在两局之间（`ensureBetweenHands`）可调，且桌上的筹码不能跌破 `minBuyIn`。
 - 边池：按 `handBet` 分层取 unique level，逐层 `pot = (level - previous) × contributors`，每个 level 取贡献者中最大牌型者均分（余数按 `seat` 偏移分配）。
 
+### 3.3.1 本局试算（整场清算）
+- **基准**：`PlayerState.startingBankroll` 是入座时的 `chips + reserveChips` 快照，
+  整场盈亏 = `totalChips - startingBankroll`。补码/回收只在桌上与备用之间转，不影响本金。
+- **只有创建人能开关**：`PokerTable.ownerPlayerId` 在第一个 `addPlayer` 时记下；
+  `setSettlementOpen()` 非创建人调用抛 `IllegalStateException`。打开后 `TableView.settlement` 非 null，
+  `canSettle` 只对创建人为 true，前端据此决定「按钮给谁看、面板给谁看」。
+- **算法** `domain/SettlementCalculator`：AI 收不了转账，把 AI 的净盈亏并入房主后再算；
+  然后把净额切成尽量多的**零和小组**（人数 ≤ 6，枚举所有划分取最优），
+  一个 k 人小组只需 k-1 笔转账，所以小组越多笔数越少；组内用「最大债主配最大债户」摊平。
+- 约定 `net > 0` 应收钱、`net < 0` 应付钱，转账执行完每人 本金 + 盈亏 已兑现、彼此不再相欠。
+
 ### 3.4 认证三件套
 - **牌桌内**：`playerId + reconnectToken`（REST + STOMP 都用，挂在 URL 参数或 body）。
 - **账号**：`accountId + accountToken`（请求头 `X-Account-Token`），用于跨牌桌的现金/战绩；落盘时用 `token()` 校验，`loginCode` 用 SHA-256 散列存盘，明文只在生成/重置时返回一次。
@@ -217,6 +228,7 @@ B=http://localhost:8080          # 以下所有示例的基点
 | POST | `/api/tables/{id}/chips/top-up` | `playerId+token` | 桌上补码（备用 → 桌上） |
 | POST | `/api/tables/{id}/chips/cash-out` | `playerId+token` | 回收（桌上 → 备用） |
 | POST | `/api/tables/{id}/emotes` | `playerId+token` | 发送语音表情 |
+| POST | `/api/tables/{id}/settlement` | `playerId+token` | 本局试算开关（**仅创建人**），打开后所有人可见 |
 | POST | `/api/accounts` | 公开 | 创建账号（首登拿到明文登录码） |
 | POST | `/api/accounts/login` | 公开 | 用昵称 + 跨设备登录码换 session |
 | GET | `/api/accounts/{id}` | `X-Account-Token` | 个人主页（筹码 + 三段战绩） |
@@ -847,8 +859,14 @@ HTML `<input type=number>` 的 `step` 校验基准是 `min`，不是 0。曾经�
 像「管理员一键把所有账号筹码设成同一个值」这种**一发请求就改全表**的接口，绝不能拿生产的 `accounts.json` 试
 （线上账号是真人玩家的余额）。做法：用同一个 jar 在服务器本机另起一个临时实例——`SERVER_PORT=18081`、
 `SERVER_ADDRESS=127.0.0.1`、`STATE_DIRECTORY=/tmp/xxx`（账号文件随之落在这个空目录），
-冒烟脚本（`python3`，见 `.workbuddy/smoke_*.py`）打 18081；跑完按 PID 文件停掉并 `rm -rf` 临时目录。
+冒烟脚本（`python3`，见 `.workbuddy/smoke_*.py`）打 18081；跑完停掉临时实例并 `rm -rf` 临时目录。
 生产侧只做**只读**核对：`/actuator/health`、`GET /api/admin/accounts` 条数、`GET /api/tables`、nginx 首页 assets 文件名。
+
+**收尾只认端口，不认 `pgrep -f`**：`pgrep -f` 的匹配范围是整条命令行，而执行它的 ssh/bash 命令行里必然含同样的关键字
+（`java`、jar 名、端口号都会命中自己）；更隐蔽的是生产的 `runuser -u poker -- ... java` 父进程属于 root，
+`pgrep -u root -f java` 会一并命中它 → kill 父进程 → 生产 JVM 跟着没。已经因此误杀过两次。
+正确写法：`PID=$(ss -ltnp | grep ':18081' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); kill "$PID"`。
+想用 PID 文件也行，但必须**先在前台 `mkdir`**，再后台启动——`mkdir ... && cd ... & echo $! > pid` 会因为 `&` 把整段丢进后台而写不到文件。
 
 ### 13.11 推送到 GitHub 走不通 `git push` 时的退路
 本机到 `github.com:443` 常被代理拦掉（`CONNECT tunnel failed, response 502`），但 `api.github.com` 可用：用 `gh auth token` + Git Data API（blob → tree → commit → 更新 ref）提交。
