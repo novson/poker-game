@@ -482,6 +482,10 @@ async function start() {
   await updateTable((id, viewer, token) => api.start(id, viewer, token))
 }
 
+async function settle(open) {
+  await updateTable((id, viewer, token) => api.settle(id, viewer, token, open))
+}
+
 async function action(payload) {
   await updateTable((id, viewer, token) => api.act(id, viewer, token, payload.type, payload.raiseTo))
 }
@@ -700,7 +704,7 @@ onBeforeUnmount(() => {
 <template>
   <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice"
     :busy="busy" :connected="connected && tableSynced" :refreshing="refreshing" :emote-event="emoteEvent"
-    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" @settle-leave="settleLeave" @refresh="refresh" />
+    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" @settle-leave="settleLeave" @settle="settle" @refresh="refresh" />
   <main v-else class="lobby-shell">
     <nav class="brand">
       <div class="brand-lockup">

@@ -18,8 +18,10 @@ const props = defineProps({
   refreshing: Boolean,
   emoteEvent: Object
 })
-const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'refresh'])
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'refresh'])
 const leavePanelOpen = ref(false)
+// 非创建人可以关掉自己眼前的试算面板，但服务端状态不变，刷新后仍会看到
+const settlementDismissed = ref(false)
 const tableStage = ref(null)
 const sceneLayout = ref(roomLayout(375, 435, true))
 let stageObserver
@@ -72,6 +74,10 @@ const canCashOut = computed(() => {
     && (remaining === 0 || remaining >= props.table.minBuyIn)
 })
 const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value))
+// 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
+const canSettle = computed(() => Boolean(props.table.canSettle))
+const settlement = computed(() => props.table.settlement || null)
+const settlementVisible = computed(() => Boolean(settlement.value) && !settlementDismissed.value)
 const actionClock = computed(() => turnClock(
   props.table.actionDeadline,
   props.table.actionTimeSeconds,
@@ -167,6 +173,7 @@ watch([betweenHands, () => me.value?.chips], ([between, chips]) => {
   if (!between) chipManagerOpen.value = false
   else if ((chips || 0) < props.table.minBuyIn) chipManagerOpen.value = true
 })
+watch(settlement, value => { if (value) settlementDismissed.value = false })
 watch(() => props.emoteEvent, event => {
   if (!event || event.type !== 'EMOTE') return
   activeEmote.value = event
@@ -272,6 +279,12 @@ function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`
 }
 
+// 盈亏带上符号，方便一眼看出谁该收钱、谁该付钱
+function signed(value) {
+  const amount = Number(value) || 0
+  return amount > 0 ? `+${amount}` : String(amount)
+}
+
 function communityEffect(index) {
   return boardMotion(index)
 }
@@ -341,6 +354,9 @@ onBeforeUnmount(() => {
         <div class="connection" :class="{ online: connected }">
           <span></span>{{ connected ? '实时在线' : '正在重连' }}
         </div>
+        <button v-if="canSettle" class="settlement-toggle" type="button" :class="{ active: settlementVisible }"
+          :aria-expanded="Boolean(settlement)" :disabled="busy" title="本局试算：计算所有人的盈亏与最快转账方案"
+          @click="emit('settle', !settlement)"><span aria-hidden="true">¥</span><b>本局试算</b></button>
         <button class="sound-settings-button" type="button" :class="{ active: musicEnabled || voiceEnabled || effectsEnabled }"
           :aria-expanded="soundPanelOpen" aria-label="声音设置" @click="toggleSoundPanel"><span aria-hidden="true">♫</span><b>声音</b></button>
       </div>
@@ -353,6 +369,42 @@ onBeforeUnmount(() => {
         {{ me?.leaving ? '已预约本手结束后离桌' : betweenHands ? '结算离桌' : '本手结束后离桌' }}
       </button>
       <button class="ghost-button" @click="emit('leave')">暂离并保留座位</button>
+    </section>
+
+    <section v-if="settlementVisible" class="settlement-panel" aria-label="本局试算">
+      <header>
+        <div><p class="eyebrow">SETTLEMENT</p><strong>本局试算</strong></div>
+        <div class="settlement-head-actions">
+          <button v-if="canSettle" type="button" :disabled="busy" @click="emit('settle', false)">对全员收起</button>
+          <button type="button" aria-label="关闭本局试算" @click="settlementDismissed = true">×</button>
+        </div>
+      </header>
+      <div class="settlement-rows">
+        <div class="settlement-row settlement-legend">
+          <span>玩家</span><span>开局本金</span><span>现有</span><span>盈亏</span>
+        </div>
+        <div v-for="row in settlement.players" :key="row.id" class="settlement-row">
+          <span class="settlement-name">
+            {{ row.nickname }}<i v-if="row.owner" class="settlement-tag">房主</i><i v-if="row.ai" class="settlement-tag">AI</i>
+          </span>
+          <span>{{ row.bankroll }}</span>
+          <span>{{ row.current }}</span>
+          <span :class="{ 'settlement-win': row.net > 0, 'settlement-loss': row.net < 0 }">{{ signed(row.net) }}</span>
+        </div>
+      </div>
+      <div class="settlement-plan">
+        <strong>最快转账方案<template v-if="settlement.transfers.length">（{{ settlement.transfers.length }} 笔）</template></strong>
+        <p v-if="!settlement.transfers.length" class="settlement-empty">现在不输不赢，不需要转账。</p>
+        <ul v-else class="settlement-transfers">
+          <li v-for="(transfer, index) in settlement.transfers" :key="index">
+            <span class="settlement-from">{{ transfer.from }}</span>
+            <i aria-hidden="true">→</i>
+            <span class="settlement-to">{{ transfer.to }}</span>
+            <strong>{{ transfer.amount }}</strong>
+          </li>
+        </ul>
+      </div>
+      <small class="settlement-note">{{ settlement.note }}</small>
     </section>
 
     <div v-if="!connected" class="connection-banner" role="status">

@@ -65,6 +65,20 @@ describe('admin account management', () => {
   })
 })
 
+describe('table settlement preview', () => {
+  it('opens the preview for everyone', async () => {
+    await api.settle('table-1', 'player-1', 'token-1', true)
+    expect(calls[0].url).toBe('/api/tables/table-1/settlement')
+    expect(calls[0].options.method).toBe('POST')
+    expect(JSON.parse(calls[0].options.body)).toEqual({ playerId: 'player-1', reconnectToken: 'token-1', open: true })
+  })
+
+  it('closes it again for the whole table', async () => {
+    await api.settle('table-1', 'player-1', 'token-1', false)
+    expect(JSON.parse(calls[0].options.body).open).toBe(false)
+  })
+})
+
 describe('error mapping', () => {
   it('surfaces the server message and status', async () => {
     vi.stubGlobal('fetch', () => respond({ message: '该账号仍在牌局中，请先离桌再删除' }, 400))

@@ -4,6 +4,7 @@ import com.example.poker.domain.Card;
 import com.example.poker.domain.GamePhase;
 import com.example.poker.domain.PlayerState;
 import com.example.poker.domain.PokerTable;
+import com.example.poker.domain.SettlementCalculator;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,13 +32,35 @@ public final class TableViews {
                              boolean winner, List<String> bestCards, List<String> cards,
                              boolean leaving, boolean timedOut) {}
 
+    /** 本局试算里一个人的账面：入座本金、当前筹码、整场盈亏。 */
+    public record SettlementPlayer(UUID id, String nickname, boolean ai, boolean owner,
+                                   int bankroll, int current, int net) {}
+
+    /** 一笔建议转账：from 付给 to。 */
+    public record SettlementTransfer(UUID fromId, String from, UUID toId, String to, int amount) {}
+
+    public record SettlementView(List<SettlementPlayer> players, List<SettlementTransfer> transfers, String note) {
+        public static SettlementView from(SettlementCalculator.Plan plan) {
+            List<SettlementPlayer> players = plan.rows().stream()
+                    .map(row -> new SettlementPlayer(row.playerId(), row.nickname(), row.ai(), row.owner(),
+                            row.bankroll(), row.current(), row.net()))
+                    .toList();
+            List<SettlementTransfer> transfers = plan.transfers().stream()
+                    .map(transfer -> new SettlementTransfer(transfer.fromPlayerId(), transfer.fromNickname(),
+                            transfer.toPlayerId(), transfer.toNickname(), transfer.amount()))
+                    .toList();
+            return new SettlementView(players, transfers, plan.note());
+        }
+    }
+
     public record TableView(UUID id, String name, int maxPlayers, boolean privateTable,
                             int totalChips, int minBuyIn, int defaultBuyIn, int maxBuyIn,
                             int smallBlind, int bigBlind,
                             GamePhase phase, String phaseLabel, long handNumber, int pot, int currentBet,
                             int minRaise, long actionDeadline, int actionTimeSeconds,
                             List<Integer> pots, String message,
-                            List<String> communityCards, List<PlayerView> players, long version) {
+                            List<String> communityCards, List<PlayerView> players, long version,
+                            boolean settlementOpen, boolean canSettle, SettlementView settlement) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
             List<PlayerView> playerViews = table.players().stream().map(player -> {
@@ -59,7 +82,9 @@ public final class TableViews {
                     table.phase(), table.phase().label(), table.handNumber(), table.pot(), table.currentBet(),
                     table.minRaise(), table.actionDeadlineEpochMillis(), table.actionTimeSeconds(),
                     table.pots(), table.message(),
-                    table.communityCards().stream().map(Card::toString).toList(), playerViews, table.version());
+                    table.communityCards().stream().map(Card::toString).toList(), playerViews, table.version(),
+                    table.settlementOpen(), table.canSettle(viewerId),
+                    table.settlementOpen() ? SettlementView.from(table.settlementPlan()) : null);
         }
     }
 

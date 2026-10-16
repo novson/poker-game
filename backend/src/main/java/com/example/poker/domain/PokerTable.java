@@ -45,6 +45,8 @@ public final class PokerTable {
     private final Map<UUID, List<Card>> showdownBestCards = new HashMap<>();
     private final Map<UUID, String> handResults = new HashMap<>();
     private final Map<UUID, Integer> handStartingTotals = new HashMap<>();
+    private UUID ownerPlayerId;
+    private boolean settlementOpen;
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
@@ -220,6 +222,8 @@ public final class PokerTable {
         if (bankroll < buyIn) throw new IllegalArgumentException("账号可用筹码不足");
         PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), accountId, nickname,
                 firstFreeSeat(), buyIn, bankroll - buyIn, ai);
+        // 第一个坐下的人就是创建人，只有 TA 能发起本局试算
+        if (players.isEmpty()) ownerPlayerId = player.id();
         players.add(player);
         players.sort(Comparator.comparingInt(PlayerState::seat));
         return player;
@@ -276,6 +280,28 @@ public final class PokerTable {
             handStartingTotals.put(player.id(), player.totalChips());
         message = "管理员已将账号筹码调整为 " + total;
         return true;
+    }
+
+    public UUID ownerPlayerId() { return ownerPlayerId; }
+    public boolean settlementOpen() { return settlementOpen; }
+    public boolean canSettle(UUID playerId) {
+        return ownerPlayerId != null && ownerPlayerId.equals(playerId);
+    }
+
+    /** 本局试算只有创建人能开关，打开后所有人在牌桌视图里都能看到。 */
+    public synchronized void setSettlementOpen(UUID playerId, boolean open) {
+        PlayerState player = requirePlayer(playerId);
+        if (!canSettle(playerId)) throw new IllegalStateException("只有牌桌创建人可以发起本局试算");
+        settlementOpen = open;
+        message = open ? player.nickname() + " 发起了本局试算" : player.nickname() + " 收起了本局试算";
+    }
+
+    public synchronized SettlementCalculator.Plan settlementPlan() {
+        List<SettlementCalculator.Entry> entries = players.stream()
+                .map(player -> new SettlementCalculator.Entry(player.id(), player.nickname(), player.ai(),
+                        player.startingBankroll(), player.totalChips()))
+                .toList();
+        return SettlementCalculator.plan(entries, ownerPlayerId);
     }
 
     public synchronized void cashOut(UUID playerId, int amount) {

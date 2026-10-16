@@ -19,6 +19,7 @@ public final class PlayerState {
     private boolean raiseAllowed;
     private boolean leaving;
     private boolean timedOut;
+    private final int startingBankroll;
     private PlayerStatus status = PlayerStatus.SITTING;
     private final List<Card> holeCards = new ArrayList<>(2);
 
@@ -41,6 +42,8 @@ public final class PlayerState {
         this.chips = chips;
         this.reserveChips = reserveChips;
         this.ai = ai;
+        // 入座时的本金快照：整场盈亏 = 现在的总额 - 这个数
+        this.startingBankroll = chips + reserveChips;
     }
 
     public UUID id() { return id; }
@@ -52,6 +55,7 @@ public final class PlayerState {
     public int chips() { return chips; }
     public int reserveChips() { return reserveChips; }
     public int totalChips() { return chips + reserveChips; }
+    public int startingBankroll() { return startingBankroll; }
     public int streetBet() { return streetBet; }
     public int handBet() { return handBet; }
     public boolean acted() { return acted; }
