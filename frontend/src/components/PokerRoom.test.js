@@ -107,6 +107,19 @@ describe('starting the next hand', () => {
     expect(root.querySelector('.status-copy').textContent).toContain('下一局开始参与')
   })
 
+  it('marks the winner with a compact badge that sits over the name, not the cards', async () => {
+    mountRoom(tableWith([
+      seat('me', 'Alice', 2600, { winner: true, cards: ['As', 'Kd'] }),
+      seat('bob', 'Bob', 1400)
+    ]))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const badge = root.querySelector('.winner-badge')
+    expect(badge).not.toBeNull()
+    // 只留奖杯图标：带文字的宽徽标会压住上方的底牌花色
+    expect(badge.textContent.trim()).toBe('🏆')
+    expect(badge.getAttribute('title')).toContain('胜者')
+  })
+
   it('does not bother the table when only an AI seat is empty', async () => {
     mountRoom(tableWith([
       seat('me', 'Alice', 2000),

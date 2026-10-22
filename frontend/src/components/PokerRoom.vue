@@ -503,7 +503,7 @@ onBeforeUnmount(() => {
               </div>
               <span v-if="seat.player.dealer" class="dealer">D</span>
               <span v-if="seat.player.ai" class="ai-badge">AI</span>
-              <span v-if="seat.player.winner" class="winner-badge">🏆 胜者</span>
+              <span v-if="seat.player.winner" class="winner-badge" title="本手胜者" aria-label="本手胜者">🏆</span>
               <strong class="player-name">{{ seat.player.nickname }}</strong>
               <span v-if="seat.player.status === 'FOLDED'" class="player-state">已弃牌</span>
               <small class="player-stack" :title="`桌外备用 ${seat.player.reserveChips}`"><span aria-hidden="true">◉</span>{{ seat.player.chips }}</small>
