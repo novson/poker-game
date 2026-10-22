@@ -14,6 +14,8 @@ import java.util.function.Supplier;
 
 public final class PokerTable {
     private static final int ACTION_TIME_SECONDS = 25;
+    /** 无人争抢获胜后结果画面保留多久，给获胜者留出「亮不亮牌」的时间。 */
+    private static final long SHOWDOWN_HOLD_MILLIS = 5_000L;
 
     private final UUID id;
     private final String name;
@@ -42,8 +44,12 @@ public final class PokerTable {
     private String message = "等待玩家加入";
     private Instant turnStartedAt;
     private final Set<UUID> showdownWinnerIds = new HashSet<>();
+    private final Set<UUID> revealedPlayerIds = new HashSet<>();
     private final Map<UUID, List<Card>> showdownBestCards = new HashMap<>();
     private final Map<UUID, String> handResults = new HashMap<>();
+    // 本手是不是「比牌摊牌」：只有比过牌才自动亮牌，无人争抢获胜不该替赢家亮牌
+    private boolean comparedShowdown;
+    private long showdownHoldUntil;
     private final Map<UUID, Integer> handStartingTotals = new HashMap<>();
     private UUID ownerPlayerId;
     private boolean settlementOpen;
@@ -156,6 +162,30 @@ public final class PokerTable {
     public boolean showdownWinner(UUID playerId) { return showdownWinnerIds.contains(playerId); }
     public List<Card> showdownBestCards(UUID playerId) {
         return showdownBestCards.getOrDefault(playerId, List.of());
+    }
+    /** 玩家主动亮牌后才公开底牌；无人争抢获胜时默认谁都不亮。 */
+    public boolean revealed(UUID playerId) { return revealedPlayerIds.contains(playerId); }
+    /** 本手是否比过牌：比过牌才会自动亮出还在局里的底牌。 */
+    public boolean comparedShowdown() { return comparedShowdown; }
+
+    /** 摊牌后结果画面的保留截止时刻（毫秒）；0 表示不保留。 */
+    public long showdownHoldUntilEpochMillis() { return showdownHoldUntil; }
+
+    /** 本手获胜者此刻能不能亮牌：还在摊牌、已经获胜、且牌还没亮出去。 */
+    public boolean canShowCards(UUID playerId) {
+        return phase == GamePhase.SHOWDOWN && showdownWinnerIds.contains(playerId)
+                && !revealedPlayerIds.contains(playerId);
+    }
+
+    /** 本手获胜者主动亮牌，亮出后所有人都能看到。 */
+    public synchronized void showCards(UUID playerId, UUID reconnectToken) {
+        authenticate(playerId, reconnectToken);
+        if (phase != GamePhase.SHOWDOWN) throw new IllegalStateException("当前没有可以展示的牌局");
+        if (!showdownWinnerIds.contains(playerId)) throw new IllegalStateException("只有本手获胜者可以展示底牌");
+        if (revealedPlayerIds.add(playerId)) {
+            PlayerState winner = requirePlayer(playerId);
+            message = winner.nickname() + " 亮出了底牌";
+        }
     }
     public int handStartingTotal(UUID playerId) {
         PlayerState player = requirePlayer(playerId);
@@ -330,8 +360,11 @@ public final class PokerTable {
         currentBet = 0;
         minRaise = bigBlind;
         showdownWinnerIds.clear();
+        revealedPlayerIds.clear();
         showdownBestCards.clear();
         handResults.clear();
+        comparedShowdown = false;
+        showdownHoldUntil = 0;
         handStartingTotals.clear();
         players.forEach(player -> handStartingTotals.put(player.id(), player.totalChips()));
         players.forEach(PlayerState::startHand);
@@ -490,6 +523,8 @@ public final class PokerTable {
     }
 
     private void showdown() {
+        // 真摊牌比过牌了，按规矩亮出还在局里的玩家的底牌
+        comparedShowdown = true;
         List<PlayerState> contenders = contenders();
         Map<PlayerState, HandValue> values = new HashMap<>();
         for (PlayerState player : contenders) values.put(player, evaluate(player));
@@ -553,6 +588,9 @@ public final class PokerTable {
         winner.win(pot);
         showdownWinnerIds.add(winner.id());
         handResults.put(winner.id(), "WIN");
+        // 别人都弃了就替赢家亮牌是不礼貌的：只记获胜，底牌留给 TA 自己决定要不要亮
+        comparedShowdown = false;
+        showdownHoldUntil = clock.instant().toEpochMilli() + SHOWDOWN_HOLD_MILLIS;
         message = winner.nickname() + " 赢得 " + pot + "（其他玩家弃牌）";
         finishHand();
     }

@@ -73,6 +73,12 @@ public class TableController {
                 request.type(), request.raiseTo());
     }
 
+    @PostMapping("/{tableId}/show-cards")
+    public TableViews.TableView showCards(@PathVariable UUID tableId,
+                                          @Valid @RequestBody Requests.PlayerCommand request) {
+        return service.showCards(tableId, request.playerId(), request.reconnectToken());
+    }
+
     @PostMapping("/{tableId}/settlement")
     public TableViews.TableView settlement(@PathVariable UUID tableId,
                                            @Valid @RequestBody Requests.SettlementCommand request) {

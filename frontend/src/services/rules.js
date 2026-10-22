@@ -59,8 +59,13 @@ export function topUpWaitPrompt(table) {
     '点“确定”立即开始（TA 补码后才能参与下一局），点“取消”等 TA 补码。'
 }
 
-export function canAutoStartNextHand(table, player) {
+/**
+ * 自动下一局。无人争抢获胜时服务端会把牌局保留 5 秒（showdownHoldUntil），
+ * 让赢家有机会亮牌，这段时间不能抢着开下一局。
+ */
+export function canAutoStartNextHand(table, player, now = Date.now()) {
   if (!table?.privateTable || table.phase !== 'SHOWDOWN' || !player || player.leaving || player.timedOut) return false
+  if ((table.showdownHoldUntil || 0) > now) return false
   if ((player.chips || 0) < (table.minBuyIn || 0)) return false
   return canStart(table)
 }

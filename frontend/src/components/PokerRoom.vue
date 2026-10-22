@@ -18,7 +18,7 @@ const props = defineProps({
   refreshing: Boolean,
   emoteEvent: Object
 })
-const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'refresh'])
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'show-cards', 'refresh'])
 const leavePanelOpen = ref(false)
 // 非创建人可以关掉自己眼前的试算面板，但服务端状态不变，刷新后仍会看到
 const settlementDismissed = ref(false)
@@ -73,7 +73,10 @@ const canCashOut = computed(() => {
   return transferAmount.value > 0 && remaining >= 0
     && (remaining === 0 || remaining >= props.table.minBuyIn)
 })
-const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value))
+// actionNow 每 200ms 刷新一次，亮牌窗口一过这里就会自己重新算出来
+const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value, actionNow.value))
+// 别人都弃牌获胜时底牌默认不公开，赢家可以自己决定亮出来
+const canShowCards = computed(() => Boolean(props.table.canShowCards))
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
 const canSettle = computed(() => Boolean(props.table.canSettle))
 const settlement = computed(() => props.table.settlement || null)
@@ -573,6 +576,11 @@ onBeforeUnmount(() => {
         <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
         <button v-if="autoCountdown" class="cancel-countdown" type="button" @click="clearAutoTimer">取消倒计时</button>
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
+      </div>
+      <div v-if="canShowCards" class="reveal-controls">
+        <button class="gold reveal-button" type="button" :disabled="busy || !connected"
+          @click="emit('show-cards')">亮出我的底牌</button>
+        <small>其他人都弃牌了，只有你点头后底牌才会公开</small>
       </div>
     </section>
     <aside class="voice-emote-dock" :class="{ expanded: voiceTrayOpen }">

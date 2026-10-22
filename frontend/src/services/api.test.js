@@ -79,6 +79,15 @@ describe('table settlement preview', () => {
   })
 })
 
+describe('winner card reveal', () => {
+  it('posts the winners request to show hole cards', async () => {
+    await api.showCards('table-1', 'player-1', 'token-1')
+    expect(calls[0].url).toBe('/api/tables/table-1/show-cards')
+    expect(calls[0].options.method).toBe('POST')
+    expect(JSON.parse(calls[0].options.body)).toEqual({ playerId: 'player-1', reconnectToken: 'token-1' })
+  })
+})
+
 describe('error mapping', () => {
   it('surfaces the server message and status', async () => {
     vi.stubGlobal('fetch', () => respond({ message: '该账号仍在牌局中，请先离桌再删除' }, 400))

@@ -219,6 +219,15 @@ public class TableService {
         });
     }
 
+    /** 本手获胜者主动亮出底牌，亮出后所有人都能看到。 */
+    public TableViews.TableView showCards(UUID tableId, UUID playerId, UUID reconnectToken) {
+        return withTable(tableId, table -> {
+            table.showCards(playerId, reconnectToken);
+            publish(tableId);
+            return TableViews.TableView.from(table, playerId);
+        });
+    }
+
     /** 本局试算：创建人开关，打开后牌桌视图里所有人都能看到盈亏与转账方案。 */
     public TableViews.TableView setSettlement(UUID tableId, UUID playerId, UUID reconnectToken, boolean open) {
         return withTable(tableId, table -> {

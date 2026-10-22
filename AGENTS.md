@@ -108,6 +108,20 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
   一个 k 人小组只需 k-1 笔转账，所以小组越多笔数越少；组内用「最大债主配最大债户」摊平。
 - 约定 `net > 0` 应收钱、`net < 0` 应付钱，转账执行完每人 本金 + 盈亏 已兑现、彼此不再相欠。
 
+### 3.3.2 摊牌：比过牌才自动亮，无人争抢留给赢家自己决定
+- **两种结束方式必须区分**：`showdown()`（真摊牌，比过牌）设 `comparedShowdown = true`；
+  `awardUncontested()`（其他人都弃了）设 `comparedShowdown = false`。
+- **底牌可见性**（`TableViews.TableView.from()`）：自己永远看得见；`revealed()` 为 true 的人公开；
+  只有 `phase == SHOWDOWN && comparedShowdown && status != FOLDED` 才自动亮。
+  所以**无人争抢获胜时不替赢家亮牌**。
+- **主动亮牌**：`PokerTable.canShowCards(playerId)` = SHOWDOWN ∧ 是本手赢家 ∧ 还没亮过；
+  `showCards(playerId, token)` 校验 token，非赢家抛 `IllegalStateException`。亮牌后写进
+  `revealedPlayerIds`，所有人立即可见，`canShowCards` 随之变 false。`start()` 时清空。
+- **5 秒保留窗口**：`awardUncontested()` 记 `showdownHoldUntil = now + 5s` 并下发 `showdownHoldUntil`。
+  前端 `rules.canAutoStartNextHand()` 在 `showdownHoldUntil > now` 时返回 false，
+  自动下一局不会抢在赢家决定之前；手动「开始下一局」不受限。
+- 无人争抢时 `showdownBestCards` 为空 → 不做赢牌高亮（公共牌都未必发全，不要事后补算 bestFive）。
+
 ### 3.4 认证三件套
 - **牌桌内**：`playerId + reconnectToken`（REST + STOMP 都用，挂在 URL 参数或 body）。
 - **账号**：`accountId + accountToken`（请求头 `X-Account-Token`），用于跨牌桌的现金/战绩；落盘时用 `token()` 校验，`loginCode` 用 SHA-256 散列存盘，明文只在生成/重置时返回一次。
@@ -228,6 +242,7 @@ B=http://localhost:8080          # 以下所有示例的基点
 | POST | `/api/tables/{id}/chips/top-up` | `playerId+token` | 桌上补码（备用 → 桌上） |
 | POST | `/api/tables/{id}/chips/cash-out` | `playerId+token` | 回收（桌上 → 备用） |
 | POST | `/api/tables/{id}/emotes` | `playerId+token` | 发送语音表情 |
+| POST | `/api/tables/{id}/show-cards` | `playerId+token` | 获胜者主动亮出底牌（**仅本手赢家**，弃牌获胜时牌局会保留 5 秒） |
 | POST | `/api/tables/{id}/settlement` | `playerId+token` | 本局试算开关（**仅创建人**），打开后所有人可见 |
 | POST | `/api/accounts` | 公开 | 创建账号（首登拿到明文登录码） |
 | POST | `/api/accounts/login` | 公开 | 用昵称 + 跨设备登录码换 session |
@@ -432,7 +447,7 @@ curl "$B/api/tables/$TABLE_ID?playerId=$PID&reconnectToken=$RT"
 }
 ```
 
-> - **`cards` 对他人永远是 `"??"`**（除非 SHOWDOWN 且未弃牌）。这是防作弊的核心，前端必须按 `'??'` 渲染背面。
+> - **`cards` 对他人永远是 `"??"`**（除非赢家主动亮牌，或真摊牌比过牌且未弃牌）。这是防作弊的核心，前端必须按 `'??'` 渲染背面。
 > - **`pots[0]` 是主池**；长度 > 1 才存在边池，UI 才显示"边池 1…"。
 > - **`version` 单调递增**，客户端用它丢弃过期响应（见 §5）。
 
@@ -575,7 +590,9 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 | `players[].cards` | 底牌明文或 `"??"`（规则见 §5） |
 | `players[].streetBet` / `handBet` | 本轮已下注 / 本局已下注 |
 | `players[].status` | SITTING/ACTIVE/ALL_IN/FOLDED/OUT |
-| `players[].winner` / `bestCards` | SHOWDOWN 时赢家标记 + 5 张最优组合 |
+| `players[].winner` / `bestCards` | SHOWDOWN 时赢家标记 + 5 张最优组合（无人争抢获胜时 `bestCards` 为空） |
+| `showdownHoldUntil` | 无人争抢获胜后保留牌局的截止毫秒时间戳（无窗口时为 0） |
+| `canShowCards` | 当前 viewer 是不是「还没亮牌的本手赢家」，决定要不要渲染亮牌按钮 |
 | `players[].leaving` | 已预约本手结束后离桌；不能自动开下一局 |
 | `players[].timedOut` | 本手曾超时，AI 桌暂停自动下一局，手动开局后重置 |
 | `version` | 全量状态版本，与 STOMP 版本一致；前端忽略旧版本和已离开牌桌的迟到响应 |
@@ -607,7 +624,8 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 
 - **响应式策略面板**只在 `table.privateTable && !betweenHands` 显示；非私人桌调用 `/advice` 会 400。
 - **`currentTurn` 与服务端 `currentTurnSeat` 同步**：组件 watch `myTurn` 触发震动/声音；`handNumber` 变化时清空上局 `previousBets` 重新计筹码飞行。
-- **底牌可见性**：`TableViews.TableView.from()` 仅在 `viewerId == player.id` 或 `phase == SHOWDOWN && status != FOLDED` 时返回明牌，否则返回 `"??"`。前端 UI 必须按 `seat.player.cards[i] === '??'` 渲染背面。
+- **底牌可见性**：`TableViews.TableView.from()` 在 `viewerId == player.id`、该玩家已 `revealed()`、或「真摊牌比过牌且 `status != FOLDED`」时才返回明牌，否则返回 `"??"`。前端 UI 必须按 `seat.player.cards[i] === '??'` 渲染背面。
+- **无人争抢获胜的亮牌**：`table.canShowCards` 为 true 时 `PokerRoom` 在控制面板渲染「亮出我的底牌」，点击 `emit('show-cards')` → `App.showCards()` → `api.showCards()`。服务端亮牌后重新下发 `canShowCards=false`，按钮自动消失。`rules.canAutoStartNextHand(table, player, now)` 第三个参数是时间戳，`showdownHoldUntil > now` 时不自动开下一局（传的是每 200ms 刷新的 `actionNow`，窗口一过会自己恢复）。
 - **`actionClock`** 服务端 25s 倒计时；前端 200ms 轮询 `actionNow`；≤5s 进入 `urgent` 触发滴答音与震动。超时后服务端自动 CHECK/FOLD，客户端会收到新版本。
 - **跨设备登录**：登录码可为 4 位数字或 12 位字母数字，12 位展示为 `XXXX-XXXX-XXXX`（仅展示用），存储时去横杠大写。复制按钮使用 `navigator.clipboard.writeText`，失败需 toast 提示。
 - **开始下一局的补码确认**：`PokerRoom.startHand()` 先算 `topUpWaitPrompt(table)`（内部用 `playersNeedingTopUp`），有人桌上筹码为 0 且备用筹码够 `minBuyIn` 就弹 `window.confirm`：确定 → 立即开始，取消 → 本次不开局，留时间等 TA 补码。AI 座位（自己会补码）、已预约离桌、备用筹码不够最低买入的人都不算。判定必须留在 `services/rules.js` 里以便单测，不要写进组件。

@@ -68,6 +68,10 @@ export const api = {
   emote: (tableId, playerId, reconnectToken, emoteId) => request(`/api/tables/${tableId}/emotes`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, emoteId })
   }),
+  // 无人争抢获胜时底牌默认不公开，获胜者可以自己决定亮出来
+  showCards: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/show-cards`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
+  }),
   // 本局试算：只有创建人能开关，打开后所有人都能看到
   settle: (tableId, playerId, reconnectToken, open) => request(`/api/tables/${tableId}/settlement`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, open })

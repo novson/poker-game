@@ -60,12 +60,15 @@ public final class TableViews {
                             int minRaise, long actionDeadline, int actionTimeSeconds,
                             List<Integer> pots, String message,
                             List<String> communityCards, List<PlayerView> players, long version,
+                            long showdownHoldUntil, boolean canShowCards,
                             boolean settlementOpen, boolean canSettle, SettlementView settlement) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
             List<PlayerView> playerViews = table.players().stream().map(player -> {
+                // 自己永远看得见；主动亮牌的人公开；真摊牌比过牌才自动亮（无人争抢获胜不替赢家亮）
                 boolean visible = player.id().equals(viewerId)
-                        || (showdown && !"FOLDED".equals(player.status().name()));
+                        || table.revealed(player.id())
+                        || (showdown && table.comparedShowdown() && !"FOLDED".equals(player.status().name()));
                 List<String> cards = visible ? player.holeCards().stream().map(Card::toString).toList()
                         : player.holeCards().stream().map(card -> "??").toList();
                 return new PlayerView(player.id(), player.nickname(), player.seat(), player.chips(),
@@ -83,6 +86,7 @@ public final class TableViews {
                     table.minRaise(), table.actionDeadlineEpochMillis(), table.actionTimeSeconds(),
                     table.pots(), table.message(),
                     table.communityCards().stream().map(Card::toString).toList(), playerViews, table.version(),
+                    table.showdownHoldUntilEpochMillis(), table.canShowCards(viewerId),
                     table.settlementOpen(), table.canSettle(viewerId),
                     table.settlementOpen() ? SettlementView.from(table.settlementPlan()) : null);
         }

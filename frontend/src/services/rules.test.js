@@ -88,5 +88,16 @@ describe('poker action rules', () => {
     expect(canAutoStartNextHand(privateTable, { ...privateTable.players[0], leaving: true })).toBe(false)
     expect(canAutoStartNextHand(privateTable, { ...privateTable.players[0], timedOut: true })).toBe(false)
   })
+
+  it('waits out the showdown hold window before auto-starting', () => {
+    const privateTable = { ...table, privateTable: true, phase: 'SHOWDOWN', minBuyIn: 1000,
+      players: [{ id: 'me', chips: 1000 }, { id: 'ai', chips: 0, reserveChips: 5000, ai: true }] }
+    const me = privateTable.players[0]
+    const held = { ...privateTable, showdownHoldUntil: 5_000 }
+    // 别人都弃牌获胜时牌局会多留 5 秒给赢家亮牌，这段时间不能抢着开下一局
+    expect(canAutoStartNextHand(held, me, 4_999)).toBe(false)
+    expect(canAutoStartNextHand(held, me, 5_000)).toBe(true)
+    expect(canAutoStartNextHand({ ...held, showdownHoldUntil: 0 }, me, 0)).toBe(true)
+  })
 })
 
