@@ -107,7 +107,7 @@ describe('starting the next hand', () => {
     expect(root.querySelector('.status-copy').textContent).toContain('下一局开始参与')
   })
 
-  it('marks the winner with a compact badge that sits over the name, not the cards', async () => {
+  it('marks the winner with a compact badge beside the name plate', async () => {
     mountRoom(tableWith([
       seat('me', 'Alice', 2600, { winner: true, cards: ['As', 'Kd'] }),
       seat('bob', 'Bob', 1400)
@@ -115,9 +115,15 @@ describe('starting the next hand', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     const badge = root.querySelector('.winner-badge')
     expect(badge).not.toBeNull()
-    // 只留奖杯图标：带文字的宽徽标会压住上方的底牌花色
+    // 只留奖杯图标 + 挂在名牌右侧（样式里 right:-15px、垂直居中）：
+    // 带文字的宽徽标会压住昵称和筹码，放在上方又会压住底牌花色
     expect(badge.textContent.trim()).toBe('🏆')
     expect(badge.getAttribute('title')).toContain('胜者')
+    expect(badge.parentElement.className).toContain('player-chip')
+    // 昵称和筹码仍在牌面里，没有被徽标顶掉
+    const plate = badge.parentElement
+    expect(plate.querySelector('.player-name').textContent).toContain('Alice')
+    expect(plate.querySelector('.player-stack').textContent).toContain('2600')
   })
 
   it('does not bother the table when only an AI seat is empty', async () => {

@@ -116,6 +116,27 @@ class PokerTableShowdownTest {
     }
 
     @Test
+    void offersNoRevealButtonWhenTheHandWasAlreadyCompared() {
+        table.join("Alice");
+        table.join("Bob");
+        table.start(table.players().get(0).id());
+        PlayerState first = table.currentPlayer();
+        table.act(first.id(), ActionType.ALL_IN, null);
+        table.act(table.currentPlayer().id(), ActionType.CALL, null);
+
+        assertThat(table.comparedShowdown()).isTrue();
+        // 真摊牌底牌本来就公开了，不能再冒出「亮出我的底牌」
+        for (PlayerState player : table.players()) {
+            assertThat(table.canShowCards(player.id())).isFalse();
+        }
+        PlayerState winner = table.players().stream().filter(player -> table.showdownWinner(player.id()))
+                .findFirst().orElseThrow();
+        assertThatThrownBy(() -> table.showCards(winner.id(), winner.reconnectToken()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("已经摊牌比过牌");
+    }
+
+    @Test
     void forgetsTheRevealOnTheNextHand() {
         PlayerState alice = table.join("Alice");
         PlayerState bob = table.join("Bob");

@@ -171,9 +171,13 @@ public final class PokerTable {
     /** 摊牌后结果画面的保留截止时刻（毫秒）；0 表示不保留。 */
     public long showdownHoldUntilEpochMillis() { return showdownHoldUntil; }
 
-    /** 本手获胜者此刻能不能亮牌：还在摊牌、已经获胜、且牌还没亮出去。 */
+    /**
+     * 本手获胜者此刻能不能亮牌：还在摊牌、已经获胜、牌还没亮出去，
+     * 且**不是真摊牌比过牌**（比过牌的底牌本来就公开了，再亮一次没意义）。
+     */
     public boolean canShowCards(UUID playerId) {
-        return phase == GamePhase.SHOWDOWN && showdownWinnerIds.contains(playerId)
+        return phase == GamePhase.SHOWDOWN && !comparedShowdown
+                && showdownWinnerIds.contains(playerId)
                 && !revealedPlayerIds.contains(playerId);
     }
 
@@ -182,6 +186,7 @@ public final class PokerTable {
         authenticate(playerId, reconnectToken);
         if (phase != GamePhase.SHOWDOWN) throw new IllegalStateException("当前没有可以展示的牌局");
         if (!showdownWinnerIds.contains(playerId)) throw new IllegalStateException("只有本手获胜者可以展示底牌");
+        if (comparedShowdown) throw new IllegalStateException("本手已经摊牌比过牌，底牌已经公开");
         if (revealedPlayerIds.add(playerId)) {
             PlayerState winner = requirePlayer(playerId);
             message = winner.nickname() + " 亮出了底牌";
