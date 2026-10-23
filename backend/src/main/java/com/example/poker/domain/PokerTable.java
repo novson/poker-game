@@ -168,7 +168,7 @@ public final class PokerTable {
     /** 本手是否比过牌：比过牌才会自动亮出还在局里的底牌。 */
     public boolean comparedShowdown() { return comparedShowdown; }
 
-    /** 摊牌后结果画面的保留截止时刻（毫秒）；0 表示不保留。 */
+    /** 摊牌后结果画面的保留截止时刻（毫秒）：这之前不显示「开始下一局」，0 表示不保留。 */
     public long showdownHoldUntilEpochMillis() { return showdownHoldUntil; }
 
     /**
@@ -595,7 +595,6 @@ public final class PokerTable {
         handResults.put(winner.id(), "WIN");
         // 别人都弃了就替赢家亮牌是不礼貌的：只记获胜，底牌留给 TA 自己决定要不要亮
         comparedShowdown = false;
-        showdownHoldUntil = clock.instant().toEpochMilli() + SHOWDOWN_HOLD_MILLIS;
         message = winner.nickname() + " 赢得 " + pot + "（其他玩家弃牌）";
         finishHand();
     }
@@ -605,6 +604,9 @@ public final class PokerTable {
         setCurrentTurnSeat(-1);
         currentBet = 0;
         pot = 0;
+        // 不管是真摊牌还是别人全弃了，都留 5 秒让人看清楚结果，
+        // 「开始下一局」不该立刻把刚结束的牌面顶掉。
+        showdownHoldUntil = clock.instant().toEpochMilli() + SHOWDOWN_HOLD_MILLIS;
     }
 
     private void setCurrentTurnSeat(int seat) {

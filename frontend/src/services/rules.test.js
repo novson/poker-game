@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { callAmount, canAllIn, canAutoStartNextHand, canStart, minimumRaiseTo,
-  playersNeedingTopUp, quickRaiseTo, topUpWaitPrompt, validRaise } from './rules'
+  playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, topUpWaitPrompt, validRaise } from './rules'
 
 describe('poker action rules', () => {
   const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{ chips: 1000 }, { chips: 1000 }] }
@@ -94,10 +94,18 @@ describe('poker action rules', () => {
       players: [{ id: 'me', chips: 1000 }, { id: 'ai', chips: 0, reserveChips: 5000, ai: true }] }
     const me = privateTable.players[0]
     const held = { ...privateTable, showdownHoldUntil: 5_000 }
-    // 别人都弃牌获胜时牌局会多留 5 秒给赢家亮牌，这段时间不能抢着开下一局
     expect(canAutoStartNextHand(held, me, 4_999)).toBe(false)
     expect(canAutoStartNextHand(held, me, 5_000)).toBe(true)
     expect(canAutoStartNextHand({ ...held, showdownHoldUntil: 0 }, me, 0)).toBe(true)
+  })
+
+  it('counts down the result hold window', () => {
+    expect(showdownHoldRemaining({ showdownHoldUntil: 5_000 }, 4_000)).toBe(1_000)
+    expect(showdownHoldRemaining({ showdownHoldUntil: 5_000 }, 5_000)).toBe(0)
+    // 已经过了也不会变负数，0 表示可以开下一局了
+    expect(showdownHoldRemaining({ showdownHoldUntil: 5_000 }, 9_000)).toBe(0)
+    expect(showdownHoldRemaining({}, 0)).toBe(0)
+    expect(showdownHoldRemaining(null, 0)).toBe(0)
   })
 })
 

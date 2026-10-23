@@ -117,9 +117,10 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 - **主动亮牌**：`PokerTable.canShowCards(playerId)` = SHOWDOWN ∧ 是本手赢家 ∧ 还没亮过；
   `showCards(playerId, token)` 校验 token，非赢家抛 `IllegalStateException`。亮牌后写进
   `revealedPlayerIds`，所有人立即可见，`canShowCards` 随之变 false。`start()` 时清空。
-- **5 秒保留窗口**：`awardUncontested()` 记 `showdownHoldUntil = now + 5s` 并下发 `showdownHoldUntil`。
-  前端 `rules.canAutoStartNextHand()` 在 `showdownHoldUntil > now` 时返回 false，
-  自动下一局不会抢在赢家决定之前；手动「开始下一局」不受限。
+- **5 秒保留窗口**：`finishHand()` 统一记 `showdownHoldUntil = now + 5s`（真摊牌和无人争抢都走这里）
+  并下发 `showdownHoldUntil`。这段时间内前端**既不自动开下一局，也不渲染「开始下一局」按钮**，
+  只在状态栏给一行「本手结果保留中 · N 秒后可开始下一局」。判断一律走
+  `rules.showdownHoldRemaining(table, now)`，别在组件里直接比时间戳。
 - 无人争抢时 `showdownBestCards` 为空 → 不做赢牌高亮（公共牌都未必发全，不要事后补算 bestFive）。
 
 ### 3.4 认证三件套
@@ -625,7 +626,11 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 - **响应式策略面板**只在 `table.privateTable && !betweenHands` 显示；非私人桌调用 `/advice` 会 400。
 - **`currentTurn` 与服务端 `currentTurnSeat` 同步**：组件 watch `myTurn` 触发震动/声音；`handNumber` 变化时清空上局 `previousBets` 重新计筹码飞行。
 - **底牌可见性**：`TableViews.TableView.from()` 在 `viewerId == player.id`、该玩家已 `revealed()`、或「真摊牌比过牌且 `status != FOLDED`」时才返回明牌，否则返回 `"??"`。前端 UI 必须按 `seat.player.cards[i] === '??'` 渲染背面。
-- **无人争抢获胜的亮牌**：`table.canShowCards` 为 true 时 `PokerRoom` 在控制面板渲染「亮出我的底牌」，点击 `emit('show-cards')` → `App.showCards()` → `api.showCards()`。服务端亮牌后重新下发 `canShowCards=false`，按钮自动消失。`rules.canAutoStartNextHand(table, player, now)` 第三个参数是时间戳，`showdownHoldUntil > now` 时不自动开下一局（传的是每 200ms 刷新的 `actionNow`，窗口一过会自己恢复）。
+- **无人争抢获胜的亮牌**：`table.canShowCards` 为 true 时 `PokerRoom` 在控制面板渲染「亮出我的底牌」，点击 `emit('show-cards')` → `App.showCards()` → `api.showCards()`。服务端亮牌后重新下发 `canShowCards=false`，按钮自动消失。
+- **结果保留 5 秒**：`rules.showdownHoldRemaining(table, now)` 返回剩余毫秒（已过期为 0）。`PokerRoom` 用
+  `holdSeconds` 决定两件事——`holdSeconds > 0` 时「开始下一局」整体不渲染、状态栏改显示倒计时提示；
+  `canAutoStartNextHand(table, player, now)` 内部也复用它，所以自动下一局同样等到窗口结束才起 3 秒倒计时。
+  两个函数都必须传每 200ms 刷新的 `actionNow`，否则窗口过了不会自己恢复。
 - **`actionClock`** 服务端 25s 倒计时；前端 200ms 轮询 `actionNow`；≤5s 进入 `urgent` 触发滴答音与震动。超时后服务端自动 CHECK/FOLD，客户端会收到新版本。
 - **跨设备登录**：登录码可为 4 位数字或 12 位字母数字，12 位展示为 `XXXX-XXXX-XXXX`（仅展示用），存储时去横杠大写。复制按钮使用 `navigator.clipboard.writeText`，失败需 toast 提示。
 - **开始下一局的补码确认**：`PokerRoom.startHand()` 先算 `topUpWaitPrompt(table)`（内部用 `playersNeedingTopUp`），有人桌上筹码为 0 且备用筹码够 `minBuyIn` 就弹 `window.confirm`：确定 → 立即开始，取消 → 本次不开局，留时间等 TA 补码。AI 座位（自己会补码）、已预约离桌、备用筹码不够最低买入的人都不算。判定必须留在 `services/rules.js` 里以便单测，不要写进组件。

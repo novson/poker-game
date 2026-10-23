@@ -60,12 +60,16 @@ export function topUpWaitPrompt(table) {
 }
 
 /**
- * 自动下一局。无人争抢获胜时服务端会把牌局保留 5 秒（showdownHoldUntil），
- * 让赢家有机会亮牌，这段时间不能抢着开下一局。
+ * 结果画面的保留剩余毫秒数。每手打完服务端都会留 5 秒（showdownHoldUntil），
+ * 这段时间内既不能自动开下一局，也不显示「开始下一局」按钮。
  */
+export function showdownHoldRemaining(table, now = Date.now()) {
+  return Math.max(0, (Number(table?.showdownHoldUntil) || 0) - now)
+}
+
 export function canAutoStartNextHand(table, player, now = Date.now()) {
   if (!table?.privateTable || table.phase !== 'SHOWDOWN' || !player || player.leaving || player.timedOut) return false
-  if ((table.showdownHoldUntil || 0) > now) return false
+  if (showdownHoldRemaining(table, now) > 0) return false
   if ((player.chips || 0) < (table.minBuyIn || 0)) return false
   return canStart(table)
 }

@@ -4,7 +4,8 @@ import PlayingCard from './PlayingCard.vue'
 import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
-  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, topUpWaitPrompt, validRaise } from '../services/rules'
+  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, topUpWaitPrompt,
+  validRaise } from '../services/rules'
 import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
 import { seatsFromViewer } from '../services/tableView'
 import { roomLayout } from '../services/roomLayout'
@@ -77,6 +78,9 @@ const canCashOut = computed(() => {
 const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value, actionNow.value))
 // 别人都弃牌获胜时底牌默认不公开，赢家可以自己决定亮出来
 const canShowCards = computed(() => Boolean(props.table.canShowCards))
+// 每手打完都留 5 秒看结果，这段时间不显示「开始下一局」
+const holdRemaining = computed(() => showdownHoldRemaining(props.table, actionNow.value))
+const holdSeconds = computed(() => Math.ceil(holdRemaining.value / 1000))
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
 const canSettle = computed(() => Boolean(props.table.canSettle))
 const settlement = computed(() => props.table.settlement || null)
@@ -555,6 +559,7 @@ onBeforeUnmount(() => {
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · {{ actionClock.seconds }} 秒 · 跟注额 {{ callAmount }}</small>
         <small v-else-if="waitingForNextHand">你已入座，本手旁观，下一局开始参与</small>
+        <small v-else-if="holdSeconds" class="hand-hold">本手结果保留中 · {{ holdSeconds }} 秒后可开始下一局</small>
         <small v-else-if="!canStart">{{ betweenHands ? '等待至少两名玩家准备好筹码' : '等待其他玩家行动' }}</small>
         <small v-else>{{ topUpWaiting.length ? `${topUpWaiting.join('、')} 桌上没筹码了，可等 TA 补码后再开始` : '至少两人即可开始下一局' }}</small>
       </div>
@@ -572,7 +577,7 @@ onBeforeUnmount(() => {
           <button class="gold custom-raise-confirm" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !connected || !canRaise" @click="act('RAISE')">确认加注</button>
         </template>
       </div>
-      <div v-else-if="canStart && !me?.leaving" class="next-hand-controls">
+      <div v-else-if="canStart && !me?.leaving && !holdSeconds" class="next-hand-controls">
         <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
         <button v-if="autoCountdown" class="cancel-countdown" type="button" @click="clearAutoTimer">取消倒计时</button>
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>

@@ -69,6 +69,19 @@ class PokerTableShowdownTest {
     }
 
     @Test
+    void keepsTheResultOnScreenAfterAComparedShowdownToo() {
+        table.join("Alice");
+        table.join("Bob");
+        table.start(table.players().get(0).id());
+        table.act(table.currentPlayer().id(), ActionType.ALL_IN, null);
+        table.act(table.currentPlayer().id(), ActionType.CALL, null);
+
+        // 真摊牌也一样：结果先留 5 秒，「开始下一局」不该立刻冒出来
+        assertThat(table.comparedShowdown()).isTrue();
+        assertThat(table.showdownHoldUntilEpochMillis() - clock.instant().toEpochMilli()).isEqualTo(5_000L);
+    }
+
+    @Test
     void letsTheWinnerRevealTheCardsToEveryone() {
         PlayerState alice = table.join("Alice");
         PlayerState bob = table.join("Bob");

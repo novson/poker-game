@@ -81,16 +81,28 @@ describe('弃牌获胜后的亮牌', () => {
     expect(root.querySelectorAll('.hole-cards').length).toBeGreaterThan(0)
   })
 
-  it('does not auto-start the next hand while the hold window is open', async () => {
-    const held = tableWith({
+  it('hides the next-hand button while the hold window is open', async () => {
+    mountRoom(tableWith({
       canShowCards: true,
       showdownHoldUntil: Date.now() + 4_000,
       players: [seat('me', 'Alice', 2600), seat('bob', 'Bob', 1400, { status: 'FOLDED' })]
-    })
-    mountRoom(held)
+    }))
     await nextTick()
-    // 5 秒保留窗口内不该冒出自动下一局的倒计时
+    // 结果保留期内既没有自动倒计时，也不该出现「开始下一局」
     expect(root.querySelector('.cancel-countdown')).toBeNull()
-    expect(root.querySelector('.start-button').textContent).toBe('开始下一局')
+    expect(root.querySelector('.start-button')).toBeNull()
+    expect(root.querySelector('.hand-hold').textContent).toContain('秒后可开始下一局')
+  })
+
+  it('shows the next-hand button once the hold window closes', async () => {
+    mountRoom(tableWith({ showdownHoldUntil: Date.now() + 4_000 }))
+    await nextTick()
+    expect(root.querySelector('.start-button')).toBeNull()
+
+    app.unmount(); root.remove()
+    mountRoom(tableWith({ showdownHoldUntil: Date.now() - 1_000 }))
+    await nextTick()
+    expect(root.querySelector('.start-button')).not.toBeNull()
+    expect(root.querySelector('.hand-hold')).toBeNull()
   })
 })
