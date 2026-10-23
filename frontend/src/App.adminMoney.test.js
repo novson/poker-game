@@ -26,7 +26,7 @@ beforeEach(async () => {
   api.adminAccounts.mockResolvedValue([])
   api.updateAdminSettings.mockResolvedValue({ totalChips: 50000, minBuyIn: 5000,
     defaultBuyIn: 10000, maxBuyIn: 20000, smallBlind: 25, bigBlind: 50 })
-  sessionStorage.setItem('poker.adminToken', 'REDACTED_ADMIN_TOKEN')
+  sessionStorage.setItem('poker.adminToken', 'test-admin-token')
   root = document.createElement('div')
   document.body.append(root)
   app = createApp(App)
@@ -110,7 +110,7 @@ it('updates every account chip balance from the admin panel', async () => {
   await settle()
 
   expect(window.confirm).toHaveBeenCalled()
-  expect(api.updateAllAdminChips).toHaveBeenCalledWith('REDACTED_ADMIN_TOKEN', 9000)
+  expect(api.updateAllAdminChips).toHaveBeenCalledWith('test-admin-token', 9000)
   expect(root.textContent).toContain('已将 2 个账号的筹码更新为 9000')
   expect(root.textContent).toContain('9000 筹码')
 })

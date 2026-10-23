@@ -126,7 +126,7 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 ### 3.4 认证三件套
 - **牌桌内**：`playerId + reconnectToken`（REST + STOMP 都用，挂在 URL 参数或 body）。
 - **账号**：`accountId + accountToken`（请求头 `X-Account-Token`），用于跨牌桌的现金/战绩；落盘时用 `token()` 校验，`loginCode` 用 SHA-256 散列存盘，明文只在生成/重置时返回一次。
-- **管理员**：`X-Admin-Token` 请求头；后端用 `MessageDigest.isEqual` 防时序攻击；口令来自 `poker.admin-token`（默认 `REDACTED_ADMIN_TOKEN`，可用 `POKER_ADMIN_TOKEN` 覆盖）。
+- **管理员**：`X-Admin-Token` 请求头；后端用 `MessageDigest.isEqual` 防时序攻击；口令来自 `poker.admin-token`（由 `POKER_ADMIN_TOKEN` 环境变量提供，未配置时管理端返回 401）。
 
 ### 3.5 实时推送协议
 - 客户端订阅 `/topic/tables/{tableId}`。
@@ -521,7 +521,7 @@ curl -X POST $B/api/tables/$TABLE_ID/emotes \
 
 ### 4.4 管理员接口
 
-> 管理员登录密钥默认为 `REDACTED_ADMIN_TOKEN`（`application.yml` 里 `poker.admin-token` 的默认值），可用环境变量 `POKER_ADMIN_TOKEN` 覆盖；口令不对或缺失时所有管理端点返回 401（**不是** 403）。
+> 管理员登录密钥由环境变量 `POKER_ADMIN_TOKEN` 提供（`application.yml` 中默认值为空）；口令不对或缺失时所有管理端点返回 401（**不是** 403）。
 
 ```bash
 # 读取金额规则
