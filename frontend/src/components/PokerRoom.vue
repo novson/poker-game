@@ -81,6 +81,19 @@ const canShowCards = computed(() => Boolean(props.table.canShowCards))
 // 每手打完都留 5 秒看结果，这段时间不显示「开始下一局」
 const holdRemaining = computed(() => showdownHoldRemaining(props.table, actionNow.value))
 const holdSeconds = computed(() => Math.ceil(holdRemaining.value / 1000))
+// 牌桌创建人（第一个入座的人）：公开桌的下一局节奏由 TA 掌握
+const isOwner = computed(() => Boolean(props.table.isOwner))
+const startReady = computed(() => canStart.value && !me.value?.leaving && !holdSeconds.value)
+// 私人桌谁都能开；公开桌只给创建人，避免陌生人抢着开局
+const startButtonVisible = computed(() => startReady.value
+  && (props.table.privateTable || isOwner.value))
+// 自动开始的秒数：私人桌沿用「自动下一局」开关（3 秒），公开桌创建人 10 秒
+const autoStartSeconds = computed(() => {
+  if (!startButtonVisible.value) return 0
+  return props.table.privateTable ? (autoNext.value ? 3 : 0) : 10
+})
+// 公开桌的非创建人：只等房主开下一局
+const waitingForOwner = computed(() => startReady.value && !startButtonVisible.value)
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
 const canSettle = computed(() => Boolean(props.table.canSettle))
 const settlement = computed(() => props.table.settlement || null)
@@ -151,10 +164,11 @@ watch([
   const suggestion = suggestedTopUp(props.table, me.value)
   if (suggestion > 0) chipAmount.value = suggestion
 }, { immediate: true })
-watch([autoNextEligible, autoNext, () => props.busy, () => props.connected], ([eligible, enabled, busy, connected]) => {
+watch([autoStartSeconds, autoNextEligible, () => props.busy, () => props.connected], ([seconds, eligible, busy, connected]) => {
   clearAutoTimer()
-  if (!eligible || !enabled || busy || !connected) return
-  autoCountdown.value = 3
+  // 私人桌：勾了「自动下一局」才自动（3 秒）；公开桌：创建人拿到按钮后 10 秒不点就自己开
+  if (!seconds || (props.table.privateTable && !eligible) || busy || !connected) return
+  autoCountdown.value = seconds
   autoTimer = window.setInterval(() => {
     autoCountdown.value--
     if (autoCountdown.value <= 0) {
@@ -560,6 +574,7 @@ onBeforeUnmount(() => {
         <small v-if="myTurn">轮到你了 · {{ actionClock.seconds }} 秒 · 跟注额 {{ callAmount }}</small>
         <small v-else-if="waitingForNextHand">你已入座，本手旁观，下一局开始参与</small>
         <small v-else-if="holdSeconds" class="hand-hold">本手结果保留中 · {{ holdSeconds }} 秒后可开始下一局</small>
+        <small v-else-if="waitingForOwner" class="hand-hold">等待房主开始下一局</small>
         <small v-else-if="!canStart">{{ betweenHands ? '等待至少两名玩家准备好筹码' : '等待其他玩家行动' }}</small>
         <small v-else>{{ topUpWaiting.length ? `${topUpWaiting.join('、')} 桌上没筹码了，可等 TA 补码后再开始` : '至少两人即可开始下一局' }}</small>
       </div>
@@ -577,8 +592,8 @@ onBeforeUnmount(() => {
           <button class="gold custom-raise-confirm" :class="{ recommended: advice?.recommendedAction === 'RAISE' }" :disabled="busy || !connected || !canRaise" @click="act('RAISE')">确认加注</button>
         </template>
       </div>
-      <div v-else-if="canStart && !me?.leaving && !holdSeconds" class="next-hand-controls">
-        <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动下一局` : '开始下一局' }}</button>
+      <div v-else-if="startButtonVisible" class="next-hand-controls">
+        <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动开始下一局` : '开始下一局' }}</button>
         <button v-if="autoCountdown" class="cancel-countdown" type="button" @click="clearAutoTimer">取消倒计时</button>
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
       </div>

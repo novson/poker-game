@@ -60,7 +60,7 @@ public final class TableViews {
                             int minRaise, long actionDeadline, int actionTimeSeconds,
                             List<Integer> pots, String message,
                             List<String> communityCards, List<PlayerView> players, long version,
-                            long showdownHoldUntil, boolean canShowCards,
+                            long showdownHoldUntil, boolean canShowCards, boolean isOwner,
                             boolean settlementOpen, boolean canSettle, SettlementView settlement) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
@@ -87,6 +87,7 @@ public final class TableViews {
                     table.pots(), table.message(),
                     table.communityCards().stream().map(Card::toString).toList(), playerViews, table.version(),
                     table.showdownHoldUntilEpochMillis(), table.canShowCards(viewerId),
+                    table.isOwner(viewerId),
                     table.settlementOpen(), table.canSettle(viewerId),
                     table.settlementOpen() ? SettlementView.from(table.settlementPlan()) : null);
         }

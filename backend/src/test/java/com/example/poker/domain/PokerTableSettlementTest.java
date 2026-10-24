@@ -12,6 +12,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class PokerTableSettlementTest {
+    @Test
+    void marksOnlyTheFirstPlayerToSitAsTheTableOwner() {
+        PokerTable table = new PokerTable(UUID.randomUUID(), "归属桌", 3, 1_000, 10, 20, Deck::new);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+
+        assertThat(table.isOwner(alice.id())).isTrue();
+        assertThat(table.isOwner(bob.id())).isFalse();
+        assertThat(table.ownerPlayerId()).isEqualTo(alice.id());
+        // 「本局试算」的创建人判定复用的就是同一个归属
+        assertThat(table.canSettle(alice.id())).isTrue();
+        assertThat(table.canSettle(bob.id())).isFalse();
+        assertThat(table.isOwner(UUID.randomUUID())).isFalse();
+    }
+
     private final MutableClock clock = new MutableClock();
     private final PokerTable table = new PokerTable(UUID.randomUUID(), "试算桌", 3,
             1_000, 10, 20, Deck::new, clock);

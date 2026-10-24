@@ -599,6 +599,7 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 | `players[].winner` / `bestCards` | SHOWDOWN 时赢家标记 + 5 张最优组合（无人争抢获胜时 `bestCards` 为空） |
 | `showdownHoldUntil` | 无人争抢获胜后保留牌局的截止毫秒时间戳（无窗口时为 0） |
 | `canShowCards` | 当前 viewer 是不是「还没亮牌的本手赢家」，决定要不要渲染亮牌按钮 |
+| `isOwner` | 当前 viewer 是不是牌桌创建人；公开桌的「开始下一局」只给 TA（见 §3.3.3） |
 | `players[].leaving` | 已预约本手结束后离桌；不能自动开下一局 |
 | `players[].timedOut` | 本手曾超时，AI 桌暂停自动下一局，手动开局后重置 |
 | `version` | 全量状态版本，与 STOMP 版本一致；前端忽略旧版本和已离开牌桌的迟到响应 |
@@ -631,6 +632,18 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 - **响应式策略面板**只在 `table.privateTable && !betweenHands` 显示；非私人桌调用 `/advice` 会 400。
 - **`currentTurn` 与服务端 `currentTurnSeat` 同步**：组件 watch `myTurn` 触发震动/声音；`handNumber` 变化时清空上局 `previousBets` 重新计筹码飞行。
 - **底牌可见性**：`TableViews.TableView.from()` 在 `viewerId == player.id`、该玩家已 `revealed()`、或「真摊牌比过牌且 `status != FOLDED`」时才返回明牌，否则返回 `"??"`。前端 UI 必须按 `seat.player.cards[i] === '??'` 渲染背面。
+### 3.3.3 谁掌握「开始下一局」
+
+| | 公开桌 | 私人桌 |
+|---|---|---|
+| 按钮给谁看 | **只有创建人** | 所有未离桌玩家 |
+| 自动开始 | 创建人拿到按钮后 **10 秒**不点就自动开 | 沿用「自动下一局」复选框（勾了 3 秒开） |
+
+- 创建人 = 第一个入座的人（`PokerTable.ownerPlayerId`），下发为 `TableView.isOwner`。
+  `canSettle()`（本局试算权限）复用的就是同一个归属，别再另写一份判定。
+- 公开桌的非创建人在状态栏看到「等待房主开始下一局」，没有按钮也不会有倒计时。
+- 自动倒计时都能用「取消倒计时」中止；10 秒自动开始**不弹补码确认**（同私人桌的自动逻辑）。
+
 - **无人争抢获胜的亮牌**：`table.canShowCards` 为 true 时 `PokerRoom` 在控制面板渲染「亮出我的底牌」，点击 `emit('show-cards')` → `App.showCards()` → `api.showCards()`。服务端亮牌后重新下发 `canShowCards=false`，按钮自动消失。
 - **结果保留 5 秒**：`rules.showdownHoldRemaining(table, now)` 返回剩余毫秒（已过期为 0）。`PokerRoom` 用
   `holdSeconds` 决定两件事——`holdSeconds > 0` 时「开始下一局」整体不渲染、状态栏改显示倒计时提示；

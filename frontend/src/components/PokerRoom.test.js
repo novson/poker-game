@@ -9,11 +9,13 @@ function seat(id, nickname, chips, extra = {}) {
 }
 
 function tableWith(players, extra = {}) {
+  // 默认把自己当创建人：公开桌的「开始下一局」只给创建人显示
   return { id: 't1', version: 3, name: '测试牌桌', phase: 'SHOWDOWN', handNumber: 1,
     pot: 0, currentBet: 0, minRaise: 20, communityCards: [], message: '',
     minBuyIn: 1000, maxBuyIn: 4000, defaultBuyIn: 2000, smallBlind: 10, bigBlind: 20,
     totalChips: 10000, maxPlayers: 6, privateTable: false, actionTimeSeconds: 25,
-    actionDeadline: 0, players, ...extra }
+    actionDeadline: 0, showdownHoldUntil: 0, canShowCards: false, isOwner: true,
+    canSettle: false, settlementOpen: false, settlement: null, players, ...extra }
 }
 
 let app, root, started

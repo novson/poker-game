@@ -319,8 +319,13 @@ public final class PokerTable {
 
     public UUID ownerPlayerId() { return ownerPlayerId; }
     public boolean settlementOpen() { return settlementOpen; }
-    public boolean canSettle(UUID playerId) {
+    /** 是不是牌桌创建人（第一个入座的人）。公开桌的「开始下一局」只给 TA 显示。 */
+    public boolean isOwner(UUID playerId) {
         return ownerPlayerId != null && ownerPlayerId.equals(playerId);
+    }
+
+    public boolean canSettle(UUID playerId) {
+        return isOwner(playerId);
     }
 
     /** 本局试算只有创建人能开关，打开后所有人在牌桌视图里都能看到。 */
