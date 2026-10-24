@@ -864,6 +864,25 @@ mvn -B spring-boot:run
 ### 13.8 版本守卫不可绕过
 任何来源的 `TableView`（REST 返回、STOMP 触发的刷新、乐观更新）都要经 `applyTable()` → `shouldApplyTable()` 版本比对，否则迟到的旧响应会**覆盖**新状态。
 
+### 13.8.1 生产由 systemd 托管：重启一律用 `systemctl`
+服务器上装了 `poker-game.service`（`enabled` + `active`），**不要**再手动 `runuser ... nohup java -jar` 去起：
+手动起的进程不受 systemd 管，会被后续一次 `systemctl restart` 悄悄换掉（2026-10-24 发生过：手动起的 PID
+20 分钟后被 systemd 的实例取代，带的环境变量还不一样，等于白部署一次）。
+
+```bash
+systemctl restart poker-game          # 换 jar 后重启
+systemctl status poker-game --no-pager
+journalctl -u poker-game -f           # 日志不再只往 /var/log/poker-backend.log
+```
+
+**管理员密钥的线上来源**：`application.yml` 现在是 `admin-token: ${POKER_ADMIN_TOKEN:}`（默认空），
+生产由 drop-in 提供——`/etc/systemd/system/poker-game.service.d/admin.conf` 引入
+`EnvironmentFile=-/etc/poker-game.env`，真正的 `POKER_ADMIN_TOKEN` 在那个文件里（root 600）。
+**改密钥改这个文件再 `systemctl restart`**；改 `application.yml` 或改手动启动命令都没有用。
+查当前生效值最可靠的办法是读进程环境：
+`tr "\0" "\n" < /proc/$(ss -ltnp | grep ':18080' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)/environ | grep ADMIN`。
+`StateDirectory=poker-game` 也在 drop-in 里，等价 `STATE_DIRECTORY=/var/lib/poker-game`。
+
 ### 13.9 远程重启别用 `pkill -f <jar 名>`
 `pkill -f poker-backend-1.0.0.jar` 会连**正在执行这条命令的 ssh/bash 自身**一起杀掉（它的命令行里就含这个字符串），表现为 ssh 直接断连、输出丢失、退出码 255。
 正确做法：先单独一次 `ps -eo pid,args | grep '[p]oker-backend'` 拿到 PID，再 `kill <pid>`；或分两条 ssh 命令执行。
