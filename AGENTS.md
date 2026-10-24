@@ -32,11 +32,12 @@ backend/                                 Spring Boot 3.5.3，JDK 17，Maven
       ActionType.java                    FOLD/CHECK/CALL/RAISE/ALL_IN
       PlayerStatus.java                  SITTING/ACTIVE/ALL_IN/FOLDED/OUT
       PlayerState.java                   玩家身份 + 可变筹码/状态；pay() 自动转 ALL_IN、requestLeave()
-      PokerTable.java                    589 行状态机（★ 核心）；access() 是唯一事务入口
+      PokerTable.java                    681 行状态机（★ 核心）；access() 是唯一事务入口
       TableAccessException.java          带 code 的牌桌访问错误（TABLE_CLOSED/SEAT_LEFT/INVALID_SESSION）
+      SettlementCalculator.java          本局试算：整场净额 → 零和小组 → 最少转账笔数（见 §3.3.1）
     service/
       PokerSettings.java                 金额规则全局配置 + 文件持久化（Properties）
-      TableService.java                  编排层（★ 核心）：withTable() 事务、finishUpdate() 收尾、超时调度
+      TableService.java                  460 行编排层（★ 核心）：withTable() 事务、finishUpdate() 收尾、超时调度
       PokerAiStrategy.java               AI 出牌策略（蒙特卡洛 + 加注/弃牌阈值）
       PokerAdvisor.java                  给真人玩家的策略建议（蒙特卡洛 + 底池赔率）
       AccountService.java                无密码账号 + 跨设备登录码（SHA-256 存盘）
@@ -44,22 +45,24 @@ backend/                                 Spring Boot 3.5.3，JDK 17，Maven
       Requests.java                      入参 record + Bean Validation 约束
       TableViews.java                    出参 record（TableSummary/TableView/PlayerView/LeaveView/...）
       AccountViews.java                  账号出参
-  src/main/resources/application.yml     Spring 配置（端口、CORS 列表、文件路径）
-  src/test/java/...                      13 个测试类（领域 + 服务）
+  src/main/resources/application.yml     Spring 配置（端口、CORS 列表、文件路径；管理员口令见 §13.8.1）
+  src/test/java/...                      19 个测试类（领域 + 服务）
   Dockerfile                             多阶段构建，最终 alpine JRE + non-root
 
 frontend/                                Vue 3.5 + Vite 7
   src/
     main.js                              createApp + 挂载 #app
-    App.vue                              639 行：大厅 + 账号 + 管理后台三合一
+    App.vue                              921 行：大厅 + 账号 + 管理后台三合一
     components/
-      PokerRoom.vue                      515 行：牌桌、行动条、计时圆环、筹码飞行、AI/语音
+      PokerRoom.vue                      626 行：牌桌、行动条、计时圆环、筹码飞行、AI/语音
       PlayingCard.vue                    扑克牌单元（隐藏态/红黑/动作/高亮）
     services/                            纯逻辑，无 Vue 依赖（★ 必须保证可单测）
       api.js                             fetch 封装：15s 超时、错误带 status + code
       socket.js                          @stomp/stompjs 封装 watchTable(id, onChange, onStatus, onEvent, onClosed)
       tableSync.js                       shouldApplyTable 版本守卫 / tableExitMessage / createTableRefresh 单飞刷新
-      rules.js                           callAmount/canStart/minimumRaiseTo/canAllIn/canAutoStartNextHand
+      rules.js                           callAmount/canStart/minimumRaiseTo/validRaise/canAllIn/quickRaiseTo/
+                                        playersNeedingTopUp/topUpWaitPrompt/showdownHoldRemaining/
+                                        canAutoStartNextHand（★ 所有牌桌判定都在这里，便于单测）
       chips.js                           topUpBounds/suggestedTopUp
       tableView.js                       seatsFromViewer（以自己座位为 12 点钟方向）
       roomLayout.js                      牌桌自适应尺寸计算
@@ -67,7 +70,9 @@ frontend/                                Vue 3.5 + Vite 7
       cards.js                           displayRank（T → 10）
       audio.js                           VOICE_EMOTES + WebAudio 背景音乐
       account.js / session.js            localStorage 读写
-    *.test.js                            Vitest 单测（12 个文件），与 services 同名
+    *.test.js                            Vitest 单测（19 个文件）：services 同名 + 组件级
+                                        （PokerRoom.test.js / .settlement.test.js / .reveal.test.js 等，
+                                        组件测试用 createApp + h() 直接挂载真实组件，无 @vue/test-utils）
   vite.config.js                         代理 /api /actuator /ws 到后端（★ 端口必须与 SERVER_PORT 一致）
   nginx.conf                             容器内静态服务 + 反代
 
@@ -676,6 +681,7 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 - 领域测试用 `PokerTable` 包内构造函数（`Supplier<Deck>` 注入）做确定性测试。`service` 测试用 `TableService` 的测试构造器，绕开 Spring。
 - 前端 Vitest + jsdom，测试文件 `*.test.js` 与被测代码同目录。`npm test -- --passWithNoTests`、`npm run build` 必须通过才能合入。
 - 提交前需 `cd backend && mvn clean verify` 与 `cd frontend && npm ci && npm test -- --passWithNoTests && npm run build` 全绿。
+- 当前基线（2026-10-24）：后端 **72** 个用例 / 19 个测试类，前端 **84** 个用例 / 19 个测试文件。数字掉下去说明漏了回归。
 
 ## 8. 本地开发与排错
 
@@ -822,6 +828,22 @@ mvn -B spring-boot:run
 
 三处同步：`resources/application.yml` 默认值 → `PokerSettings`（`@Value` 注入）或对应 service → `compose.yml` 的 `backend.environment`。本地运行时用 `$env:XXX`（见 §8.2）。漏改 `application.yml` 默认值会导致裸跑启动失败。
 
+### 12.6.1 改线上管理员口令 — 🟢（不用改代码）
+
+口令是运行时注入的，`application.yml` 现在是 `${POKER_ADMIN_TOKEN:}`，**jar 里不含任何口令**：
+
+```bash
+cp -a /etc/poker-game.env /etc/poker-game.env.bak-$(date +%Y%m%d-%H%M%S)
+sed -i 's|^POKER_ADMIN_TOKEN=.*|POKER_ADMIN_TOKEN=<新值>|' /etc/poker-game.env
+chmod 600 /etc/poker-game.env          # sed -i 后确认权限没变
+systemctl restart poker-game           # 必须重启才生效
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/api/admin/settings -H "X-Admin-Token: <新值>"
+```
+
+不需要改代码、不需要 `mvn package`、不需要换新 jar、前端 dist 更不用动。
+两点：**重启会清空内存里的牌局**，改之前先 `curl /api/tables` 看一眼；
+**env 文件一旦丢失或该行被删，管理后台就是彻底 401**，不会再回退到任何默认口令。
+
 ### 12.7 改行动倒计时 / 超时行为 — 🟡
 
 - 服务端：`service/TableService.java`（`@Scheduled` 每 500ms 扫描）、`domain/PokerTable.java`（超时后无跟注额 → CHECK，否则 FOLD）。
@@ -885,17 +907,24 @@ journalctl -u poker-game -f           # 日志不再只往 /var/log/poker-backen
 
 ### 13.9 远程重启别用 `pkill -f <jar 名>`
 `pkill -f poker-backend-1.0.0.jar` 会连**正在执行这条命令的 ssh/bash 自身**一起杀掉（它的命令行里就含这个字符串），表现为 ssh 直接断连、输出丢失、退出码 255。
-正确做法：先单独一次 `ps -eo pid,args | grep '[p]oker-backend'` 拿到 PID，再 `kill <pid>`；或分两条 ssh 命令执行。
 
-**按用户过滤同样不安全**：生产进程是 `runuser -u poker -- ... java -jar`，其中 `runuser` 父进程**属于 root**，
-只有 java 子进程属于 `poker`。于是 `pgrep -u root -f <jar 名>` 会同时命中 root 的 runuser 父进程**和**自己的 ssh/bash，
-一次误杀就把生产带上；`pgrep -u poker -f java` 才是安全的（自己的 shell 是 bash 不是 java）。
-要区分「生产实例」和「临时冒烟实例」时，别用命令行/用户猜——**启动时把 `$!` 写进 PID 文件，收尾按 PID 文件 kill**。
+生产现在由 systemd 托管，**要重启就用 `systemctl restart poker-game`**（见 §13.8.1），压根不需要找 PID。
+只有临时冒烟实例（18081）才需要手动 kill，而且同样要按端口认：
+`PID=$(ss -ltnp | grep ':18081' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); kill "$PID"`。
+
+**按用户过滤同样不安全**：历史上生产是 `runuser -u poker -- ... java -jar`，`runuser` 父进程**属于 root**，
+只有 java 子进程属于 `poker`，于是 `pgrep -u root -f <jar 名>` 会同时命中 root 的 runuser 父进程**和**自己的 ssh/bash，
+一次误杀就把生产带上（已经发生过两次）。即便现在是 systemd，`pgrep -f java` 依旧会命中自己的 shell。
+要区分「生产实例」和「临时冒烟实例」时，**永远按端口认 PID，不要按命令行或用户名猜**。
 
 ### 13.10 金额输入框不要绑 `step=bigBlind`
 HTML `<input type=number>` 的 `step` 校验基准是 `min`，不是 0。曾经给「最低/默认/最高带入」和「调整金额」写了
 `min="1" :step="table.bigBlind"`，大盲 50 时合法值变成 `1,51,101…`，想填 5000 会被浏览器拦下并提示“最接近的有效值为 4951 和 5001”
 —— 连内置预设 5000/10000/20000 都存不进去。金额类输入统一 `step="1"`（任意整数），规则校验交给服务端 `PokerSettings.validate()`。
+
+### 13.11 推送到 GitHub 走不通 `git push` 时的退路
+本机到 `github.com:443` 常被代理拦掉（`CONNECT tunnel failed, response 502`），但 `api.github.com` 可用：用 `gh auth token` + Git Data API（blob → tree → commit → 更新 ref）提交。
+**注意**：必须从 git 对象库取内容（`git cat-file blob $(git rev-parse HEAD:<path>)`），不要直接读工作区文件——Windows 工作区是 CRLF，直接上传会把仓库里的 LF 全改成 CRLF。
 
 ### 13.12 会改线上真实数据的功能，冒烟要起隔离实例
 像「管理员一键把所有账号筹码设成同一个值」这种**一发请求就改全表**的接口，绝不能拿生产的 `accounts.json` 试
@@ -905,14 +934,23 @@ HTML `<input type=number>` 的 `step` 校验基准是 `min`，不是 0。曾经�
 生产侧只做**只读**核对：`/actuator/health`、`GET /api/admin/accounts` 条数、`GET /api/tables`、nginx 首页 assets 文件名。
 
 **收尾只认端口，不认 `pgrep -f`**：`pgrep -f` 的匹配范围是整条命令行，而执行它的 ssh/bash 命令行里必然含同样的关键字
-（`java`、jar 名、端口号都会命中自己）；更隐蔽的是生产的 `runuser -u poker -- ... java` 父进程属于 root，
-`pgrep -u root -f java` 会一并命中它 → kill 父进程 → 生产 JVM 跟着没。已经因此误杀过两次。
+（`java`、jar 名、端口号都会命中自己）。生产由 systemd 托管后，service 里同样含这些关键字，
+`pgrep -f java` 依然会误伤——已经因此误杀过两次。
 正确写法：`PID=$(ss -ltnp | grep ':18081' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); kill "$PID"`。
 想用 PID 文件也行，但必须**先在前台 `mkdir`**，再后台启动——`mkdir ... && cd ... & echo $! > pid` 会因为 `&` 把整段丢进后台而写不到文件。
 
-### 13.11 推送到 GitHub 走不通 `git push` 时的退路
-本机到 `github.com:443` 常被代理拦掉（`CONNECT tunnel failed, response 502`），但 `api.github.com` 可用：用 `gh auth token` + Git Data API（blob → tree → commit → 更新 ref）提交。
-**注意**：必须从 git 对象库取内容（`git cat-file blob $(git rev-parse HEAD:<path>)`），不要直接读工作区文件——Windows 工作区是 CRLF，直接上传会把仓库里的 LF 全改成 CRLF。
+### 13.13 别拿「jar 整体哈希」或「单个 class 哈希」当一致性判据
+Spring Boot repackage 的 jar 每次打包时间戳都变，**整体 sha256 必然不同**，不能用来判断"线上是不是同一份代码"。
+按 jar 内部 class 比（`unzip -p x.jar BOOT-INF/classes/.../X.class | sha256sum`）在同机同 JDK 下可靠，
+但**跨机器要小心**：本机是 Temurin 17.0.20.1，服务器是 Dragonwell 17.0.19，同一份源码编出的字节码可能不同
+（实测 `TableService.class` 哈希对不上，实际差异只是 `"/topic/tables/" + id` 的拼接编译方式——
+一边 `String.valueOf(Object)` 再 concat，一边直接 concat UUID，行为完全等价）。
+
+判定顺序建议：
+1. 先比 `PokerTable.class` / `TableViews.class` 等核心类哈希；
+2. 有类对不上就 `javap -p` 比**方法签名**——签名一致说明没有功能分叉；
+3. 再看 `javap -p -c` 的 diff 是"逻辑变了"还是"常量池编号 `#416`/`#420` 漂移"（后者无害）；
+4. 前端只看 nginx 首页返回的 assets 文件名是否等于本机构建产物。
 
 ---
 
