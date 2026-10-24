@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick as vueTick } from 'vue'
+import { createApp, h, nextTick as vueTick, reactive } from 'vue'
 import PokerRoom from './PokerRoom.vue'
 
 function seat(id, nickname, chips, extra = {}) {
@@ -20,17 +20,19 @@ function tableWith(extra = {}) {
 
 let app, root, startCalls
 
-function mountRoom(table, playerId = 'me') {
+function mountRoom(table, controls = {}) {
   root = document.createElement('div')
   document.body.append(root)
   startCalls = 0
+  const state = reactive({ busy: false, connected: true, ...controls })
   app = createApp({
     render: () => h(PokerRoom, {
-      table, playerId, busy: false, connected: true, refreshing: false,
+      table, playerId: 'me', ...state, refreshing: false,
       onStart: () => { startCalls++ }
     })
   })
   app.mount(root)
+  return state
 }
 
 // 不能用 setTimeout(0) 等渲染：配合 vi.useFakeTimers() 时它永远不会 resolve
@@ -44,6 +46,7 @@ afterEach(() => {
   app?.unmount()
   root?.remove()
   localStorage.clear()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -68,34 +71,49 @@ describe('公开桌的「开始下一局」只给创建人', () => {
     expect(root.querySelector('.start-button')).not.toBeNull()
   })
 
-  it('still hides the button during the result hold window', async () => {
+  it('shows the countdown immediately but still hides the button during the result hold window', async () => {
+    // 本手已结束 1 秒：剩余总窗口就是 9 秒，证明计时来自服务端时间戳
     mountRoom(tableWith({ isOwner: true, showdownHoldUntil: Date.now() + 4_000 }))
     await nextTick()
     expect(root.querySelector('.start-button')).toBeNull()
-    expect(root.querySelector('.hand-hold').textContent).toContain('本手结果保留中')
+    expect(root.querySelector('.hand-hold').textContent).toContain('9 秒后自动开始下一局')
   })
 
-  it('counts 10 seconds down for the creator of a public table', async () => {
+  it.each([
+    { scenario: '比牌摊牌、无主动亮牌按钮', canShowCards: false },
+    { scenario: '无人争抢、可主动亮牌', canShowCards: true }
+  ])('counts 10 seconds from the end of the hand: $scenario', async ({ canShowCards }) => {
     vi.useFakeTimers()
-    mountRoom(tableWith({ isOwner: true }))
+    mountRoom(tableWith({ isOwner: true, canShowCards, showdownHoldUntil: Date.now() + 5_000 }))
     await nextTick()
-    const button = root.querySelector('.start-button')
-    expect(button.textContent).toContain('10 秒后自动开始下一局')
+    expect(root.querySelector('.start-button')).toBeNull()
+    expect(root.querySelector('.hand-hold').textContent).toContain('10 秒后自动开始下一局')
+    expect(Boolean(root.querySelector('.reveal-button'))).toBe(canShowCards)
+
+    vi.advanceTimersByTime(4_000)
+    await nextTick()
+    expect(root.querySelector('.start-button')).toBeNull()
+    expect(root.querySelector('.hand-hold').textContent).toContain('6 秒后自动开始下一局')
+
+    vi.advanceTimersByTime(1_000)
+    await nextTick()
+    expect(root.querySelector('.start-button').textContent).toContain('5 秒后自动开始下一局')
     expect(root.querySelector('.cancel-countdown')).not.toBeNull()
 
-    vi.advanceTimersByTime(9_000)
+    vi.advanceTimersByTime(4_000)
     await nextTick()
     expect(root.querySelector('.start-button').textContent).toContain('1 秒后')
 
     vi.advanceTimersByTime(1_000)
     await nextTick()
     expect(startCalls).toBe(1)
-    vi.useRealTimers()
   })
 
-  it('lets the creator cancel the countdown', async () => {
+  it('lets the creator cancel the countdown when the button appears', async () => {
     vi.useFakeTimers()
-    mountRoom(tableWith({ isOwner: true }))
+    mountRoom(tableWith({ isOwner: true, showdownHoldUntil: Date.now() + 5_000 }))
+    await nextTick()
+    vi.advanceTimersByTime(5_000)
     await nextTick()
     root.querySelector('.cancel-countdown').click()
     await nextTick()
@@ -115,5 +133,38 @@ describe('公开桌的「开始下一局」只给创建人', () => {
     await nextTick()
     expect(startCalls).toBe(0)
     vi.useRealTimers()
+  })
+
+  it('continues the same countdown when the hold window closes', async () => {
+    vi.useFakeTimers()
+    mountRoom(tableWith({ isOwner: true, showdownHoldUntil: Date.now() + 5_000 }))
+    await nextTick()
+    expect(root.querySelector('.start-button')).toBeNull()
+
+    // 保留期只控制按钮可见性，不能把已经走了 5 秒的倒计时重置成 10 秒
+    vi.advanceTimersByTime(5_000)
+    await nextTick()
+    const button = root.querySelector('.start-button')
+    expect(button).not.toBeNull()
+    expect(button.textContent).toContain('5 秒后自动开始下一局')
+  })
+
+  it('keeps the absolute countdown running through a busy reveal request', async () => {
+    vi.useFakeTimers()
+    const controls = mountRoom(tableWith({
+      isOwner: true, canShowCards: true, showdownHoldUntil: Date.now() + 5_000
+    }))
+    await nextTick()
+    vi.advanceTimersByTime(2_000)
+    await nextTick()
+    expect(root.querySelector('.hand-hold').textContent).toContain('8 秒后自动开始下一局')
+
+    // 亮牌请求期间 busy 再恢复，绝对截止时间不动
+    controls.busy = true
+    await nextTick()
+    vi.advanceTimersByTime(1_000)
+    controls.busy = false
+    await nextTick()
+    expect(root.querySelector('.hand-hold').textContent).toContain('7 秒后自动开始下一局')
   })
 })

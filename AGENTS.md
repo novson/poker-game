@@ -119,12 +119,12 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 - **底牌可见性**（`TableViews.TableView.from()`）：自己永远看得见；`revealed()` 为 true 的人公开；
   只有 `phase == SHOWDOWN && comparedShowdown && status != FOLDED` 才自动亮。
   所以**无人争抢获胜时不替赢家亮牌**。
-- **主动亮牌**：`PokerTable.canShowCards(playerId)` = SHOWDOWN ∧ 是本手赢家 ∧ 还没亮过；
+- **主动亮牌**：`PokerTable.canShowCards(playerId)` = SHOWDOWN ∧ 未真摊牌比牌 ∧ 是本手赢家 ∧ 还没亮过；
   `showCards(playerId, token)` 校验 token，非赢家抛 `IllegalStateException`。亮牌后写进
   `revealedPlayerIds`，所有人立即可见，`canShowCards` 随之变 false。`start()` 时清空。
 - **5 秒保留窗口**：`finishHand()` 统一记 `showdownHoldUntil = now + 5s`（真摊牌和无人争抢都走这里）
-  并下发 `showdownHoldUntil`。这段时间内前端**既不自动开下一局，也不渲染「开始下一局」按钮**，
-  只在状态栏给一行「本手结果保留中 · N 秒后可开始下一局」。判断一律走
+  并下发 `showdownHoldUntil`。这段时间内前端不渲染「开始下一局」按钮；公开桌创建人从本手结束
+  就看到 10 秒自动开始倒计时，其他场景保留原提示。判断一律走
   `rules.showdownHoldRemaining(table, now)`，别在组件里直接比时间戳。
 - 无人争抢时 `showdownBestCards` 为空 → 不做赢牌高亮（公共牌都未必发全，不要事后补算 bestFive）。
 
@@ -597,7 +597,7 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 | `players[].streetBet` / `handBet` | 本轮已下注 / 本局已下注 |
 | `players[].status` | SITTING/ACTIVE/ALL_IN/FOLDED/OUT |
 | `players[].winner` / `bestCards` | SHOWDOWN 时赢家标记 + 5 张最优组合（无人争抢获胜时 `bestCards` 为空） |
-| `showdownHoldUntil` | 无人争抢获胜后保留牌局的截止毫秒时间戳（无窗口时为 0） |
+| `showdownHoldUntil` | 每手结束后保留牌局的截止毫秒时间戳（真摊牌和无人争抢都有；无窗口时为 0） |
 | `canShowCards` | 当前 viewer 是不是「还没亮牌的本手赢家」，决定要不要渲染亮牌按钮 |
 | `isOwner` | 当前 viewer 是不是牌桌创建人；公开桌的「开始下一局」只给 TA（见 §3.3.3） |
 | `players[].leaving` | 已预约本手结束后离桌；不能自动开下一局 |
@@ -637,18 +637,21 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 | | 公开桌 | 私人桌 |
 |---|---|---|
 | 按钮给谁看 | **只有创建人** | 所有未离桌玩家 |
-| 自动开始 | 创建人拿到按钮后 **10 秒**不点就自动开 | 沿用「自动下一局」复选框（勾了 3 秒开） |
+| 自动开始 | 本手结束起 **10 秒**自动开：前 5 秒只倒计时，后 5 秒同时显示按钮 | 沿用「自动下一局」复选框（勾了 3 秒开） |
 
 - 创建人 = 第一个入座的人（`PokerTable.ownerPlayerId`），下发为 `TableView.isOwner`。
   `canSettle()`（本局试算权限）复用的就是同一个归属，别再另写一份判定。
 - 公开桌的非创建人在状态栏看到「等待房主开始下一局」，没有按钮也不会有倒计时。
-- 自动倒计时都能用「取消倒计时」中止；10 秒自动开始**不弹补码确认**（同私人桌的自动逻辑）。
+- 公开桌的比牌摊牌与可主动亮牌场景共用同一时间线；`canShowCards` 只控制亮牌按钮，不影响下一局计时。
+- 倒计时可用「取消倒计时」中止（公开桌在后 5 秒按钮出现时才能取消）；10 秒自动开始**不弹补码确认**（同私人桌的自动逻辑）。
 
 - **无人争抢获胜的亮牌**：`table.canShowCards` 为 true 时 `PokerRoom` 在控制面板渲染「亮出我的底牌」，点击 `emit('show-cards')` → `App.showCards()` → `api.showCards()`。服务端亮牌后重新下发 `canShowCards=false`，按钮自动消失。
 - **结果保留 5 秒**：`rules.showdownHoldRemaining(table, now)` 返回剩余毫秒（已过期为 0）。`PokerRoom` 用
-  `holdSeconds` 决定两件事——`holdSeconds > 0` 时「开始下一局」整体不渲染、状态栏改显示倒计时提示；
-  `canAutoStartNextHand(table, player, now)` 内部也复用它，所以自动下一局同样等到窗口结束才起 3 秒倒计时。
-  两个函数都必须传每 200ms 刷新的 `actionNow`，否则窗口过了不会自己恢复。
+  `holdSeconds` 控制按钮：前 5 秒不渲染「开始下一局」，后 5 秒显示。公开桌的 10 秒倒计时从本手结束
+  立即启动，保留期结束只改变按钮可见性，**不能重置倒计时**；私人桌仍由
+  `canAutoStartNextHand(table, player, now)` 等窗口结束才起 3 秒倒计时。公开桌计时 watch 使用独立的
+  `autoTimerEligible`，不要直接监听私人桌资格值，否则它会在第 5 秒变化并重启公开桌计时。
+  时间判断必须传每 200ms 刷新的 `actionNow`，否则窗口过了按钮不会自己恢复。
 - **`actionClock`** 服务端 25s 倒计时；前端 200ms 轮询 `actionNow`；≤5s 进入 `urgent` 触发滴答音与震动。超时后服务端自动 CHECK/FOLD，客户端会收到新版本。
 - **跨设备登录**：登录码可为 4 位数字或 12 位字母数字，12 位展示为 `XXXX-XXXX-XXXX`（仅展示用），存储时去横杠大写。复制按钮使用 `navigator.clipboard.writeText`，失败需 toast 提示。
 - **开始下一局的补码确认**：`PokerRoom.startHand()` 先算 `topUpWaitPrompt(table)`（内部用 `playersNeedingTopUp`），有人桌上筹码为 0 且备用筹码够 `minBuyIn` 就弹 `window.confirm`：确定 → 立即开始，取消 → 本次不开局，留时间等 TA 补码。AI 座位（自己会补码）、已预约离桌、备用筹码不够最低买入的人都不算。判定必须留在 `services/rules.js` 里以便单测，不要写进组件。
@@ -694,7 +697,7 @@ curl -X DELETE $B/api/admin/accounts/$ID -H "X-Admin-Token: $ADMIN"
 - 领域测试用 `PokerTable` 包内构造函数（`Supplier<Deck>` 注入）做确定性测试。`service` 测试用 `TableService` 的测试构造器，绕开 Spring。
 - 前端 Vitest + jsdom，测试文件 `*.test.js` 与被测代码同目录。`npm test -- --passWithNoTests`、`npm run build` 必须通过才能合入。
 - 提交前需 `cd backend && mvn clean verify` 与 `cd frontend && npm ci && npm test -- --passWithNoTests && npm run build` 全绿。
-- 当前基线（2026-10-24）：后端 **72** 个用例 / 19 个测试类，前端 **84** 个用例 / 19 个测试文件。数字掉下去说明漏了回归。
+- 当前基线（2026-10-25）：后端 **73** 个用例 / 19 个测试类，前端 **93** 个用例 / 20 个测试文件。数字掉下去说明漏了回归。
 
 ## 8. 本地开发与排错
 

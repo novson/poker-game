@@ -87,11 +87,33 @@ const startReady = computed(() => canStart.value && !me.value?.leaving && !holdS
 // 私人桌谁都能开；公开桌只给创建人，避免陌生人抢着开局
 const startButtonVisible = computed(() => startReady.value
   && (props.table.privateTable || isOwner.value))
-// 自动开始的秒数：私人桌沿用「自动下一局」开关（3 秒），公开桌创建人 10 秒
-const autoStartSeconds = computed(() => {
-  if (!startButtonVisible.value) return 0
-  return props.table.privateTable ? (autoNext.value ? 3 : 0) : 10
+// 公开桌摊牌用「本手结束 + 10 秒」的绝对截止时间：亮牌/短暂 busy 都不会重置它
+const publicAutoReady = computed(() => !props.table.privateTable && isOwner.value
+  && canStart.value && !me.value?.leaving)
+const publicShowdown = computed(() => !props.table.privateTable
+  && props.table.phase === 'SHOWDOWN')
+const publicAutoDeadline = computed(() => {
+  const holdUntil = Number(props.table.showdownHoldUntil) || 0
+  return publicShowdown.value && holdUntil > 0 ? holdUntil + 5_000 : 0
 })
+const publicAutoSeconds = computed(() => publicAutoDeadline.value
+  ? Math.max(0, Math.ceil((publicAutoDeadline.value - actionNow.value) / 1000))
+  : 0)
+const publicAutoCancelled = ref(false)
+const autoStartEmitted = ref(false)
+// 没有服务端保留时间戳时（旧状态/兜底），沿用原来的相对倒计时
+const autoStartSeconds = computed(() => {
+  if (props.table.privateTable) return startButtonVisible.value && autoNext.value ? 3 : 0
+  if (publicAutoDeadline.value) return 0
+  return startButtonVisible.value ? 10 : 0
+})
+const nextHandCountdown = computed(() => publicAutoDeadline.value
+  ? (publicAutoCancelled.value ? 0 : publicAutoSeconds.value)
+  : autoCountdown.value)
+const publicCountdownVisible = computed(() => Boolean(publicAutoDeadline.value)
+  && !publicAutoCancelled.value && publicAutoSeconds.value > 0)
+// 私人桌的筹码/超时限制不参与公开桌计时，否则 5 秒保留期结束会重启倒计时
+const autoTimerEligible = computed(() => props.table.privateTable ? autoNextEligible.value : true)
 // 公开桌的非创建人：只等房主开下一局
 const waitingForOwner = computed(() => startReady.value && !startButtonVisible.value)
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
@@ -164,10 +186,10 @@ watch([
   const suggestion = suggestedTopUp(props.table, me.value)
   if (suggestion > 0) chipAmount.value = suggestion
 }, { immediate: true })
-watch([autoStartSeconds, autoNextEligible, () => props.busy, () => props.connected], ([seconds, eligible, busy, connected]) => {
+watch([autoStartSeconds, autoTimerEligible, () => props.busy, () => props.connected], ([seconds, eligible, busy, connected]) => {
   clearAutoTimer()
-  // 私人桌：勾了「自动下一局」才自动（3 秒）；公开桌：创建人拿到按钮后 10 秒不点就自己开
-  if (!seconds || (props.table.privateTable && !eligible) || busy || !connected) return
+  // 私人桌：保留窗口结束且勾选自动后倒 3 秒；公开桌：本手结束立即倒 10 秒
+  if (!seconds || !eligible || busy || !connected) return
   autoCountdown.value = seconds
   autoTimer = window.setInterval(() => {
     autoCountdown.value--
@@ -177,6 +199,21 @@ watch([autoStartSeconds, autoNextEligible, () => props.busy, () => props.connect
     }
   }, 1000)
 }, { immediate: true })
+// 新一手/新保留窗口开始时，重置绝对倒计时的“已自动开”与取消状态
+watch(() => `${props.table.id}:${props.table.handNumber}:${props.table.showdownHoldUntil}:${props.table.phase}`, () => {
+  publicAutoCancelled.value = false
+  autoStartEmitted.value = false
+})
+// 绝对倒计时到 0：创建人在场且连接正常才自动开，只发一次
+watch([publicAutoSeconds, publicShowdown, publicAutoReady, () => props.busy, () => props.connected],
+  ([seconds, showdown, ready, busy, connected]) => {
+    // 没有服务端保留时间戳的状态不走绝对自动开，交给相对倒计时兜底
+    if (!showdown || !publicAutoDeadline.value || !ready
+      || publicAutoCancelled.value || autoStartEmitted.value) return
+    if (seconds > 0 || busy || !connected) return
+    autoStartEmitted.value = true
+    emit('start')
+  }, { immediate: true })
 watch(myTurn, value => {
   if (value && effectsEnabled.value && navigator.vibrate) navigator.vibrate(70)
   if (!value) customRaiseExpanded.value = false
@@ -216,10 +253,16 @@ function quickRaise(amount) {
 function startHand() {
   if (props.busy || !props.connected) return
   clearAutoTimer()
+  autoStartEmitted.value = true
   // 有人桌上没筹码时先确认一次：确定立即开始，取消则留时间等 TA 补码
   const prompt = topUpWaitPrompt(props.table)
   if (prompt && !window.confirm(prompt)) return
   emit('start')
+}
+
+function cancelAutoStart() {
+  if (publicAutoDeadline.value) publicAutoCancelled.value = true
+  else clearAutoTimer()
 }
 
 function clearAutoTimer() {
@@ -573,6 +616,7 @@ onBeforeUnmount(() => {
         <p>{{ table.message }}</p>
         <small v-if="myTurn">轮到你了 · {{ actionClock.seconds }} 秒 · 跟注额 {{ callAmount }}</small>
         <small v-else-if="waitingForNextHand">你已入座，本手旁观，下一局开始参与</small>
+        <small v-else-if="holdSeconds && publicCountdownVisible" class="hand-hold">{{ nextHandCountdown }} 秒后自动开始下一局</small>
         <small v-else-if="holdSeconds" class="hand-hold">本手结果保留中 · {{ holdSeconds }} 秒后可开始下一局</small>
         <small v-else-if="waitingForOwner" class="hand-hold">等待房主开始下一局</small>
         <small v-else-if="!canStart">{{ betweenHands ? '等待至少两名玩家准备好筹码' : '等待其他玩家行动' }}</small>
@@ -593,8 +637,8 @@ onBeforeUnmount(() => {
         </template>
       </div>
       <div v-else-if="startButtonVisible" class="next-hand-controls">
-        <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ autoCountdown ? `${autoCountdown} 秒后自动开始下一局` : '开始下一局' }}</button>
-        <button v-if="autoCountdown" class="cancel-countdown" type="button" @click="clearAutoTimer">取消倒计时</button>
+        <button class="gold start-button" :disabled="busy || !connected" @click="startHand">{{ nextHandCountdown ? `${nextHandCountdown} 秒后自动开始下一局` : '开始下一局' }}</button>
+        <button v-if="nextHandCountdown" class="cancel-countdown" type="button" @click="cancelAutoStart">取消倒计时</button>
         <label v-if="table.privateTable" class="auto-next-toggle"><input v-model="autoNext" type="checkbox" @change="toggleAutoNext" /><span>自动下一局</span></label>
       </div>
       <div v-if="canShowCards" class="reveal-controls">
