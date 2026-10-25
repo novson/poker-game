@@ -1008,3 +1008,29 @@ History follows Conventional Commit prefixes such as `feat:`, `fix:`, `test:`, a
 ### Security & Configuration
 
 Do not commit `.env` files, credentials, admin tokens, or SSH keys. Configure allowed origins and runtime settings through environment variables or deployment configuration. Poker state is process-local unless explicitly persisted; consider restart and compatibility effects when changing state models.
+
+## 14. CI/CD（GitHub Actions，2026-10-25 上线）
+
+流水线文件：`.github/workflows/deploy.yml`。`push main` 或手动 `workflow_dispatch` 触发。
+
+### 14.1 流程
+
+1. **test-backend / test-frontend**：云端并行跑 `mvn -B test`（73 例）与 `npm ci && npm test`（93 例），全部在 GitHub runner 上，服务器零负载。
+2. **build**：全绿后 `mvn -DskipTests package` + `npm run build`，上传 `deploy-bundle` artifact（jar + dist，保留 7 天）。同时用 `git diff <before> HEAD` 判断是否改到 `backend/`，输出 `backend-changed`。
+3. **deploy-frontend**：**总是执行、全自动**。打包 dist → scp → 服务器上备份旧 dist 到 `/opt/poker-game/backups/<时间戳>-actions-frontend/` → 原子换目录。不重启后端，不清牌局。
+4. **deploy-backend**：仅当 `backend-changed == true` 才执行，且挂在 `environment: production` 上——**需要到 Actions 页面点 "Review deployments" 人工确认**（保护规则已配置，reviewer 是 novson）。确认后：备份旧 jar → 替换 → `systemctl restart poker-game` → 轮询 `/actuator/health` 最多 60 秒，失败自动打出 `journalctl` 最后 50 行。
+
+### 14.2 凭据与配置
+
+- 仓库 Secret：`DEPLOY_SSH_KEY`（部署私钥 `id_ed25519_139_224_254_109` 的加密副本，服务端公钥经 libsodium sealed box 加密上传）。**换私钥要重新生成这个 Secret**。
+- 服务器凭据仍只在服务端；workflow 用 `ssh-keyscan` 做 TOFU 写入 runner 的 known_hosts，runner 是一次性的，不落盘。
+- `production` 环境保护：Settings → Environments → production，required reviewer = novson，仅 `main` 分支可部署。
+- 构建产物 jar 名固定 `poker-backend-1.0.0.jar`；后端健康检查走 `127.0.0.1:18080`（与生产 systemd 环境一致）。
+
+### 14.3 日常使用
+
+- **只改前端**：push 后等全绿即上线，无需任何人工操作。
+- **改了后端**：push 后等测试/build 完，去 Actions 运行页点 **Review deployments → production → Approve and deploy**；确认后自动重启并健康检查。
+- **回滚**：服务器上从 `/opt/poker-game/backups/<时间戳>-actions-*/` 取旧 dist/jar 还原；jar 回滚后记得 `systemctl restart poker-game`。
+- **重跑**：Actions 页面 Re-run failed jobs 即可，前端部署是幂等的（先备份后替换）。
+- 并发控制：同一分支新 push 会取消还在跑的旧 run（`concurrency` 配置），不会出现旧产物覆盖新产物。
