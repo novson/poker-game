@@ -4,8 +4,8 @@ import PlayingCard from './PlayingCard.vue'
 import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
-  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, topUpWaitPrompt,
-  validRaise } from '../services/rules'
+  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, squidPenaltyPrompt,
+  squidPenaltyPending, topUpWaitPrompt, validRaise } from '../services/rules'
 import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
 import { seatsFromViewer } from '../services/tableView'
 import { roomLayout } from '../services/roomLayout'
@@ -19,7 +19,7 @@ const props = defineProps({
   refreshing: Boolean,
   emoteEvent: Object
 })
-const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'show-cards', 'refresh'])
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'show-cards', 'refresh', 'settle-squid'])
 const leavePanelOpen = ref(false)
 // 非创建人可以关掉自己眼前的试算面板，但服务端状态不变，刷新后仍会看到
 const settlementDismissed = ref(false)
@@ -116,6 +116,10 @@ const publicCountdownVisible = computed(() => Boolean(publicAutoDeadline.value)
 const autoTimerEligible = computed(() => props.table.privateTable ? autoNextEligible.value : true)
 // 公开桌的非创建人：只等房主开下一局
 const waitingForOwner = computed(() => startReady.value && !startButtonVisible.value)
+// 鱿鱼游戏：赔付没结清就不允许开下一局
+const squidPending = computed(() => squidPenaltyPending(props.table))
+const squidPendingText = computed(() => squidPenaltyPrompt(props.table))
+const mySquidDebt = computed(() => me.value?.squidDebt || 0)
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
 const canSettle = computed(() => Boolean(props.table.canSettle))
 const settlement = computed(() => props.table.settlement || null)
@@ -496,6 +500,24 @@ onBeforeUnmount(() => {
       </label>
     </section>
 
+    <section v-if="table.squid" class="squid-panel" aria-label="鱿鱼游戏">
+      <div class="squid-summary">
+        <span class="squid-title"><span aria-hidden="true">🐙</span> 鱿鱼游戏 · 第 {{ table.squid.round }} 轮</span>
+        <span class="squid-pool">剩余标记 <strong>{{ table.squid.markersRemaining }}</strong> / {{ table.squid.markerTotal }}</span>
+        <span class="squid-penalty-rule">罚金 {{ table.squid.penaltyBigBlinds }} BB（每个有标记的人收 {{ table.squid.penaltyAmount }} 筹码）</span>
+      </div>
+      <div class="squid-markers">
+        <span v-for="player in table.squid.players" :key="player.id" class="squid-chip"
+          :class="{ squid: player.squidId, marked: player.markers > 0 }">
+          <strong>{{ player.nickname }}</strong>
+          <small>{{ player.markers > 0 ? `🐙 ×${player.markers}` : '无标记' }}</small>
+        </span>
+      </div>
+      <p v-if="squidPendingText" class="squid-warning" role="alert">{{ squidPendingText }}</p>
+      <button v-if="mySquidDebt > 0" class="gold squid-settle" type="button" :disabled="busy || !connected"
+        @click="emit('settle-squid')">结算鱿鱼赔付 {{ mySquidDebt }} 筹码</button>
+    </section>
+
     <section ref="tableStage" class="table-stage">
       <div class="table-scene" :style="{ width: `${sceneLayout.sceneWidth}px`, height: `${sceneLayout.sceneHeight}px` }">
       <div class="poker-table" :style="{ width: `${sceneLayout.tableWidth}px`, height: `${sceneLayout.tableHeight}px` }">
@@ -568,6 +590,11 @@ onBeforeUnmount(() => {
               <span v-if="seat.player.dealer" class="dealer">D</span>
               <span v-if="seat.player.ai" class="ai-badge">AI</span>
               <span v-if="seat.player.winner" class="winner-badge" title="本手胜者" aria-label="本手胜者">🏆</span>
+              <span v-if="table.squid && seat.player.squidMarkers > 0" class="squid-marker-badge"
+                :title="`鱿鱼标记 ×${seat.player.squidMarkers}`" aria-label="鱿鱼标记">🐙 {{ seat.player.squidMarkers }}</span>
+              <span v-if="table.squid && seat.player.squidId" class="squid-id-badge"
+                :title="seat.player.squidDebt > 0 ? `鱿鱼，待赔付 ${seat.player.squidDebt}` : '本轮鱿鱼'"
+                aria-label="本轮鱿鱼">鱿鱼</span>
               <strong class="player-name">{{ seat.player.nickname }}</strong>
               <span v-if="seat.player.status === 'FOLDED'" class="player-state">已弃牌</span>
               <small class="player-stack" :title="`桌外备用 ${seat.player.reserveChips}`"><span aria-hidden="true">◉</span>{{ seat.player.chips }}</small>

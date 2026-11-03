@@ -3,9 +3,29 @@ export function callAmount(table, player) {
 }
 
 export function canStart(table) {
+  if (squidPenaltyPending(table)) return false
   return ['WAITING', 'SHOWDOWN'].includes(table.phase) && table.players.filter(player =>
     !player.leaving && ((player.chips || 0) > 0 || (player.ai
       && (player.reserveChips || 0) >= (table.minBuyIn || 1)))).length >= 2
+}
+
+/**
+ * 鱿鱼赔付还没结清时不允许开始下一局，必须先让鱿鱼补码并赔付。
+ */
+export function squidPenaltyPending(table) {
+  return !!table?.squid?.penaltyPending
+}
+
+/** 鱿鱼赔付提示文案；没有待结清赔付时返回 null。 */
+export function squidPenaltyPrompt(table) {
+  const squid = table?.squid
+  if (!squid?.penaltyPending) return null
+  return squid.penaltyPrompt || '鱿鱼赔付尚未结清，必须先补码并完成赔付才能开始下一局'
+}
+
+/** 当前玩家是不是待赔付的鱿鱼。 */
+export function isSquidPayer(table, player) {
+  return !!player && !!table?.squid?.penaltyPending && player.squidDebt > 0
 }
 
 export function minimumRaiseTo(table) {

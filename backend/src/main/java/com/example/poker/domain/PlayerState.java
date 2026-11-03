@@ -20,6 +20,8 @@ public final class PlayerState {
     private boolean leaving;
     private boolean timedOut;
     private final int startingBankroll;
+    /** 鱿鱼游戏：本轮已拿到的鱿鱼标记数量（可以累计）。 */
+    private int squidMarkers;
     private PlayerStatus status = PlayerStatus.SITTING;
     private final List<Card> holeCards = new ArrayList<>(2);
 
@@ -62,6 +64,14 @@ public final class PlayerState {
     public boolean raiseAllowed() { return raiseAllowed; }
     public boolean leaving() { return leaving; }
     public boolean timedOut() { return timedOut; }
+    public int squidMarkers() { return squidMarkers; }
+    public void addSquidMarker() { squidMarkers++; }
+    public void resetSquidMarkers() { squidMarkers = 0; }
+    /** 鱿鱼赔付：从桌上筹码里转给别人，不计入下注额。 */
+    public void transferChips(int amount) {
+        if (amount < 0 || amount > chips) throw new IllegalArgumentException("筹码不足");
+        chips -= amount;
+    }
     public void markTimedOut() { timedOut = true; }
     public void requestLeave() { leaving = true; }
     public PlayerStatus status() { return status; }

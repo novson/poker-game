@@ -95,16 +95,33 @@ public class TableService {
 
     public TableViews.SessionView create(String tableName, String nickname, UUID accountId, UUID accountToken,
                                          Integer maxPlayers, Boolean privateTable, Integer aiPlayers, Integer buyIn) {
+        return create(tableName, nickname, accountId, accountToken, maxPlayers, privateTable, aiPlayers, buyIn,
+                false, null, null);
+    }
+
+    public TableViews.SessionView create(String tableName, String nickname, UUID accountId, UUID accountToken,
+                                         Integer maxPlayers, Boolean privateTable, Integer aiPlayers, Integer buyIn,
+                                         Boolean squidGame, Integer squidMarkerCount, Integer squidPenaltyBigBlinds) {
         int seats = maxPlayers == null ? 6 : maxPlayers;
         boolean isPrivate = Boolean.TRUE.equals(privateTable);
         int aiCount = aiPlayers == null ? 0 : aiPlayers;
         if (aiCount > 0 && !isPrivate) throw new IllegalArgumentException("AI 选手仅支持私人牌桌");
         if (aiCount >= seats) throw new IllegalArgumentException("至少需要为真人保留一个座位");
 
+        boolean squid = Boolean.TRUE.equals(squidGame);
+        int markerCount = squidMarkerCount == null ? 10 : squidMarkerCount;
+        int penaltyBlinds = squidPenaltyBigBlinds == null ? 2 : squidPenaltyBigBlinds;
+        if (squid) {
+            if (markerCount < 2 || markerCount > 60)
+                throw new IllegalArgumentException("鱿鱼标记数量必须在 2 到 60 之间");
+            if (penaltyBlinds < 1 || penaltyBlinds > 100)
+                throw new IllegalArgumentException("鱿鱼罚金必须在 1 到 100 个 BB 之间");
+        }
+
         PokerSettings.Values values = settings.values();
         PokerTable table = new PokerTable(UUID.randomUUID(), tableName.trim(), seats,
                 values.totalChips(), values.minBuyIn(), values.defaultBuyIn(), values.maxBuyIn(),
-                values.smallBlind(), values.bigBlind(), isPrivate);
+                values.smallBlind(), values.bigBlind(), isPrivate, squid, markerCount, penaltyBlinds);
         PlayerState player;
         if (accountId == null || accountToken == null) {
             player = table.join(nickname.trim(), buyIn);
@@ -288,8 +305,18 @@ public class TableService {
         });
     }
 
-    public TableViews.TableView cashOut(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {
+    /** 鱿鱼赔付结算：鱿鱼补码后调用，把欠款付给有标记的玩家。 */
+    public TableViews.TableView settleSquidPenalty(UUID tableId, UUID playerId, UUID reconnectToken) {
         return withTable(tableId, table -> {
+            table.authenticate(playerId, reconnectToken);
+            boolean settled = table.settleSquidPenalty(playerId);
+            if (!settled) throw new IllegalStateException("当前没有需要结算的鱿鱼赔付");
+            finishUpdate(table);
+            return TableViews.TableView.from(table, playerId);
+        });
+    }
+
+    public TableViews.TableView cashOut(UUID tableId, UUID playerId, UUID reconnectToken, int amount) {        return withTable(tableId, table -> {
             table.authenticate(playerId, reconnectToken);
             table.cashOut(playerId, amount);
             finishUpdate(table);

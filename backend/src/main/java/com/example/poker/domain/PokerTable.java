@@ -54,33 +54,79 @@ public final class PokerTable {
     private UUID ownerPlayerId;
     private boolean settlementOpen;
 
+    // ===== 鱿鱼游戏 =====
+    /** 是否开启鱿鱼游戏。 */
+    private final boolean squidGame;
+    /** 一轮里桌上总共发多少个鱿鱼标记。 */
+    private final int squidMarkerTotal;
+    /** 鱿鱼赔付：每赔付给一个玩家多少个 BB。 */
+    private final int squidPenaltyBigBlinds;
+    /** 本轮还剩多少个标记没发出去。 */
+    private int squidMarkersRemaining;
+    /** 当前是第几轮（标记发完一次就 +1）。 */
+    private int squidRound = 1;
+    /** 本轮被判为鱿鱼、但赔付还没结清的人（玩家 id -> 还欠多少筹码）。 */
+    private final Map<UUID, Integer> squidDebt = new HashMap<>();
+    /** 本轮收赔付的人（有标记的玩家）。 */
+    private final Set<UUID> squidRecipients = new HashSet<>();
+    /** 本轮被判为鱿鱼的人。 */
+    private final Set<UUID> squidIds = new HashSet<>();
+    /** 未结清的赔付义务（鱿鱼 -> 收赔付的人）。 */
+    private final List<SquidObligation> squidObligations = new ArrayList<>();
+    /** 是否还有未结清的鱿鱼赔付（未结清就不能开下一局）。 */
+    private boolean squidPenaltyPending;
+    /** 本手攒下来的鱿鱼提示，等结果消息定稿后再拼上去。 */
+    private String squidNotice = "";
+    /** 本轮鱿鱼判定已经完成（标记发完、赔付已判定），等下一局开始才重置。 */
+    private boolean squidRoundResolved;
+
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
-                smallBlind, bigBlind, false, Deck::new);
+                smallBlind, bigBlind, false, false, 0, 0, Deck::new);
     }
 
     public PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
                       boolean privateTable) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
-                smallBlind, bigBlind, privateTable, Deck::new);
+                smallBlind, bigBlind, privateTable, false, 0, 0, Deck::new);
+    }
+
+    /** 带鱿鱼游戏配置的牌桌。squidGame 为 false 时后面三个参数被忽略。 */
+    public PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
+                      int defaultBuyIn, int maxBuyIn, int smallBlind, int bigBlind,
+                      boolean privateTable, boolean squidGame, int squidMarkerCount,
+                      int squidPenaltyBigBlinds) {
+        this(id, name, maxPlayers, totalChips, minBuyIn, defaultBuyIn, maxBuyIn,
+                smallBlind, bigBlind, privateTable, squidGame, squidMarkerCount,
+                squidPenaltyBigBlinds, Deck::new);
     }
 
     public PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
                       int defaultBuyIn, int maxBuyIn, int smallBlind, int bigBlind,
                       boolean privateTable) {
         this(id, name, maxPlayers, totalChips, minBuyIn, defaultBuyIn, maxBuyIn,
-                smallBlind, bigBlind, privateTable, Deck::new);
+                smallBlind, bigBlind, privateTable, false, 0, 0, Deck::new);
     }
 
     PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
                Supplier<Deck> deckFactory) {
         this(id, name, maxPlayers, startingChips, 1, startingChips, startingChips,
-                smallBlind, bigBlind, false, deckFactory);
+                smallBlind, bigBlind, false, false, 0, 0, deckFactory);
     }
 
     PokerTable(UUID id, String name, int maxPlayers, int startingChips, int smallBlind, int bigBlind,
                Supplier<Deck> deckFactory, Clock clock) {
         this(id, name, maxPlayers, startingChips, smallBlind, bigBlind, deckFactory);
+        this.clock = clock;
+    }
+
+    /** 测试用：可注入牌堆和时钟的鱿鱼牌桌。 */
+    PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
+               int defaultBuyIn, int maxBuyIn, int smallBlind, int bigBlind,
+               boolean squidGame, int squidMarkerCount, int squidPenaltyBigBlinds,
+               Supplier<Deck> deckFactory, Clock clock) {
+        this(id, name, maxPlayers, totalChips, minBuyIn, defaultBuyIn, maxBuyIn, smallBlind, bigBlind,
+                false, squidGame, squidMarkerCount, squidPenaltyBigBlinds, deckFactory);
         this.clock = clock;
     }
 
@@ -119,7 +165,8 @@ public final class PokerTable {
 
     private PokerTable(UUID id, String name, int maxPlayers, int totalChips, int minBuyIn,
                        int defaultBuyIn, int maxBuyIn, int smallBlind, int bigBlind,
-                       boolean privateTable, Supplier<Deck> deckFactory) {
+                       boolean privateTable, boolean squidGame, int squidMarkerCount,
+                       int squidPenaltyBigBlinds, Supplier<Deck> deckFactory) {
         this.id = id;
         this.name = name;
         this.maxPlayers = maxPlayers;
@@ -130,6 +177,10 @@ public final class PokerTable {
         this.maxBuyIn = maxBuyIn;
         this.smallBlind = smallBlind;
         this.bigBlind = bigBlind;
+        this.squidGame = squidGame;
+        this.squidMarkerTotal = squidGame ? Math.max(1, squidMarkerCount) : 0;
+        this.squidPenaltyBigBlinds = squidGame ? Math.max(1, squidPenaltyBigBlinds) : 0;
+        this.squidMarkersRemaining = this.squidMarkerTotal;
         this.deckFactory = deckFactory;
     }
 
@@ -319,6 +370,23 @@ public final class PokerTable {
 
     public UUID ownerPlayerId() { return ownerPlayerId; }
     public boolean settlementOpen() { return settlementOpen; }
+
+    // ===== 鱿鱼游戏：对外状态 =====
+    public boolean squidGame() { return squidGame; }
+    public int squidMarkerTotal() { return squidMarkerTotal; }
+    public int squidMarkersRemaining() { return squidMarkersRemaining; }
+    public int squidPenaltyBigBlinds() { return squidPenaltyBigBlinds; }
+    /** 一次赔付的金额（筹码）：罚金 BB 数 × 大盲。 */
+    public int squidPenaltyAmount() { return squidPenaltyBigBlinds * bigBlind; }
+    public int squidRound() { return squidRound; }
+    /** 是否还有没结清的鱿鱼赔付（没结清就不能开下一局）。 */
+    public boolean squidPenaltyPending() { return squidPenaltyPending; }
+    /** 某个玩家当前欠下的赔付总额。 */
+    public int squidDebt(UUID playerId) { return squidDebt.getOrDefault(playerId, 0); }
+    /** 本轮这个人是不是被判成了鱿鱼。 */
+    public boolean squidId(UUID playerId) { return squidIds.contains(playerId); }
+    /** 本轮未结清的赔付明细。 */
+    public List<SquidObligation> squidObligations() { return List.copyOf(squidObligations); }
     /** 是不是牌桌创建人（第一个入座的人）。公开桌的「开始下一局」只给 TA 显示。 */
     public boolean isOwner(UUID playerId) {
         return ownerPlayerId != null && ownerPlayerId.equals(playerId);
@@ -358,6 +426,12 @@ public final class PokerTable {
         requirePlayer(playerId);
         if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
             throw new IllegalStateException("牌局已经开始");
+        // 鱿鱼赔付没结清就不允许开下一局，必须先让鱿鱼补码并赔付
+        ensureNoPendingSquidPenalty();
+        // 上一轮鱿鱼游戏已经判定完 → 开新一轮：清空标记、恢复标记池、轮次 +1
+        if (squidGame && squidRoundResolved) resetSquidRound();
+        // 新一局开始：上一轮的鱿鱼名单作废（新一轮重新发标记）
+        if (squidGame) squidIds.clear();
         autoTopUpAi();
         long eligible = players.stream().filter(player -> player.chips() > 0).count();
         if (eligible < 2) throw new IllegalStateException("至少需要两名还有筹码的玩家");
@@ -563,6 +637,8 @@ public final class PokerTable {
                                     || "WIN".equals(nextResult) ? "WIN" : "TIE");
                 });
                 String label = potIndex == 0 ? "主池" : "边池 " + potIndex;
+                // 只有唯一赢下主池的人才拿鱿鱼标记；主池平分、只赢边池都不算
+                if (potIndex == 0 && winners.size() == 1) grantSquidMarker(winners.get(0));
                 potIndex++;
                 String names = winners.stream().map(PlayerState::nickname).reduce((a, b) -> a + "、" + b).orElse("");
                 results.add(names + " 以" + best.category().label() + "赢得" + label + " " + amount);
@@ -601,6 +677,8 @@ public final class PokerTable {
         // 别人都弃了就替赢家亮牌是不礼貌的：只记获胜，底牌留给 TA 自己决定要不要亮
         comparedShowdown = false;
         message = winner.nickname() + " 赢得 " + pot + "（其他玩家弃牌）";
+        // 唯一赢下主池（这里就是全部底池）的玩家拿一个鱿鱼标记
+        grantSquidMarker(winner);
         finishHand();
     }
 
@@ -609,9 +687,186 @@ public final class PokerTable {
         setCurrentTurnSeat(-1);
         currentBet = 0;
         pot = 0;
+        // 鱿鱼提示拼到结果消息后面
+        flushSquidNotice();
         // 不管是真摊牌还是别人全弃了，都留 5 秒让人看清楚结果，
         // 「开始下一局」不该立刻把刚结束的牌面顶掉。
         showdownHoldUntil = clock.instant().toEpochMilli() + SHOWDOWN_HOLD_MILLIS;
+    }
+
+    // ===== 鱿鱼游戏核心 =====
+
+    /**
+     * 唯一赢下主池的玩家拿一个标记。标记可以累计。
+     * 标记发完（桌上剩余标记归零）后进入赔付判定。
+     */
+    private void grantSquidMarker(PlayerState winner) {
+        if (!squidGame) return;
+        if (squidMarkersRemaining <= 0) return;
+        squidMarkersRemaining--;
+        winner.addSquidMarker();
+        squidRecipients.add(winner.id());
+        appendSquidNotice(winner.nickname() + " 获得 1 个鱿鱼标记");
+        if (squidMarkersRemaining == 0) resolveSquidRound();
+    }
+
+    /** 鱿鱼相关的提示先攒着，等牌局结果消息定稿后再拼上去，避免被覆盖。 */
+    private void appendSquidNotice(String notice) {
+        squidNotice = squidNotice.isEmpty() ? notice : squidNotice + "；" + notice;
+    }
+
+    private void flushSquidNotice() {
+        if (squidNotice.isEmpty()) return;
+        message = message + "；" + squidNotice;
+        squidNotice = "";
+    }
+
+    /**
+     * 标记发完后：所有没拿到标记的人都是鱿鱼，要给每个有标记的玩家赔 xx BB。
+     * 赔付不足时保留未结清义务，并且**不允许开始下一局**，必须先处理赔付。
+     */
+    private void resolveSquidRound() {
+        List<PlayerState> recipients = players.stream()
+                .filter(player -> squidRecipients.contains(player.id()))
+                .toList();
+        List<PlayerState> squids = players.stream()
+                .filter(player -> !squidRecipients.contains(player.id()))
+                .toList();
+        squidIds.clear();
+        squidIds.addAll(squids.stream().map(PlayerState::id).toList());
+        squidDebt.clear();
+        squidObligations.clear();
+
+        if (squids.isEmpty() || recipients.isEmpty()) {
+            // 没有鱿鱼（或没有人可收赔付）：本轮直接结束，等下一局开始时重置
+            squidRoundResolved = true;
+            return;
+        }
+
+        int penalty = squidPenaltyAmount();
+        for (PlayerState squid : squids) {
+            for (PlayerState recipient : recipients) {
+                if (squid.id().equals(recipient.id())) continue;
+                squidObligations.add(new SquidObligation(squid.id(), recipient.id(), penalty));
+            }
+        }
+        applySquidPayments();
+    }
+
+    /**
+     * 用桌上的筹码执行赔付：鱿鱼给每个收赔付的玩家转 penalty 筹码。
+     * 筹码不够就先转能转的，剩下的记成未结清义务（下一局前必须补齐）。
+     */
+    private void applySquidPayments() {
+        squidDebt.clear();
+        for (SquidObligation obligation : squidObligations) {
+            if (obligation.amount() <= 0) continue;
+            PlayerState squid = players.stream().filter(p -> p.id().equals(obligation.squidId()))
+                    .findFirst().orElse(null);
+            PlayerState recipient = players.stream().filter(p -> p.id().equals(obligation.recipientId()))
+                    .findFirst().orElse(null);
+            if (squid == null || recipient == null) {
+                obligation.settle(obligation.amount());
+                continue;
+            }
+            int payable = Math.min(obligation.amount(), squid.chips());
+            if (payable > 0) {
+                squid.transferChips(payable);
+                recipient.win(payable);
+                obligation.settle(payable);
+            }
+        }
+        squidObligations.removeIf(obligation -> obligation.amount() <= 0);
+
+        for (SquidObligation obligation : squidObligations) {
+            squidDebt.merge(obligation.squidId(), obligation.amount(), Integer::sum);
+        }
+        squidPenaltyPending = !squidObligations.isEmpty();
+        if (squidPenaltyPending) {
+            appendSquidNotice("鱿鱼赔付未结清（" + squidIdNames() + "），必须先补齐才能开始下一局");
+        } else {
+            // 本轮已判定完，但标记和鱿鱼名单要留到下一局开始才清空，
+            // 这样结果画面还能看到「谁拿了几 个标记 / 谁被判鱿鱼」。
+            squidRoundResolved = true;
+            appendSquidNotice("鱿鱼赔付已完成（" + squidIdNames() + "）");
+        }
+    }
+
+    private String nicknameOf(UUID playerId) {
+        return players.stream().filter(player -> player.id().equals(playerId))
+                .map(PlayerState::nickname).findFirst().orElse("未知玩家");
+    }
+
+    private String squidIdNames() {
+        return squidIds.stream().map(this::nicknameOf).reduce((a, b) -> a + "、" + b).orElse("无");
+    }
+
+    /**
+     * 一轮结束、准备开下一轮时调用：重置玩家标记和桌上标记，轮次 +1。
+     * 赔付结清前不会走到这里（没结清就不允许开下一局）。
+     * squidIds 会保留到下一局开始，让玩家在本局内仍能看到谁是鱿鱼。
+     */
+    private void resetSquidRound() {
+        players.forEach(PlayerState::resetSquidMarkers);
+        squidRecipients.clear();
+        squidDebt.clear();
+        squidObligations.clear();
+        squidPenaltyPending = false;
+        squidRoundResolved = false;
+        squidMarkersRemaining = squidMarkerTotal;
+        squidRound++;
+    }
+
+    /**
+     * 鱿鱼赔付结算（牌桌上还有未结清义务时由服务层调用）。
+     * 玩家补码之后调用一次，把欠款付清。
+     */
+    public synchronized boolean settleSquidPenalty(UUID playerId) {
+        if (!squidGame || squidObligations.isEmpty()) return false;
+        PlayerState squid = requirePlayer(playerId);
+        boolean touched = false;
+        for (SquidObligation obligation : squidObligations) {
+            if (!obligation.squidId().equals(squid.id())) continue;
+            touched = true;
+            int payable = Math.min(obligation.amount(), squid.chips());
+            if (payable > 0) {
+                squid.transferChips(payable);
+                PlayerState recipient = players.stream()
+                        .filter(p -> p.id().equals(obligation.recipientId())).findFirst().orElse(null);
+                if (recipient != null) recipient.win(payable);
+                obligation.settle(payable);
+            }
+        }
+        if (!touched) return false;
+        squidObligations.removeIf(obligation -> obligation.amount() <= 0);
+        squidDebt.clear();
+        for (SquidObligation obligation : squidObligations) {
+            squidDebt.merge(obligation.squidId(), obligation.amount(), Integer::sum);
+        }
+        squidPenaltyPending = !squidObligations.isEmpty();
+        if (squidPenaltyPending) {
+            message = "鱿鱼赔付仍未结清，请补码后再次结算";
+        } else {
+            // 赔付结清 → 本轮可以结束，等下一局开始时重置标记、进入新一轮
+            squidRoundResolved = true;
+            message = "鱿鱼赔付已结清，可以开始下一局";
+        }
+        return true;
+    }
+
+    /** 标记发完但赔付还没结清时，不允许开始下一局。 */
+    private void ensureNoPendingSquidPenalty() {
+        if (squidPenaltyPending) {
+            String names = squidIds.stream().map(this::nicknameOf).reduce((a, b) -> a + "、" + b).orElse("");
+            throw new IllegalStateException("鱿鱼赔付尚未结清（" + names + "），必须先补码并完成赔付才能开始下一局");
+        }
+    }
+
+    /** 标记池空了但赔付还没付清时的提示文案。 */
+    public String squidPenaltyPrompt() {
+        if (!squidPenaltyPending) return null;
+        String names = squidIds.stream().map(this::nicknameOf).reduce((a, b) -> a + "、" + b).orElse("");
+        return names + " 需要赔付（每人 " + squidPenaltyAmount() + " 筹码）才能开始下一局";
     }
 
     private void setCurrentTurnSeat(int seat) {

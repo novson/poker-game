@@ -36,6 +36,9 @@ const aiPlayers = ref(maxPlayers.value - 1)
 const tableSettings = ref({ totalChips: 10000, minBuyIn: 1000, defaultBuyIn: 2000,
   maxBuyIn: 4000, smallBlind: 10, bigBlind: 20 })
 const buyIn = ref(2000)
+const squidGame = ref(false)
+const squidMarkerCount = ref(6)
+const squidPenaltyBigBlinds = ref(2)
 const availableBalance = computed(() => accountProfile.value?.chips ?? tableSettings.value.totalChips)
 const createBuyIn = computed(() => buyInState(tableSettings.value, buyIn.value, availableBalance.value))
 const entryBlocked = computed(() => busy.value || initializing.value || !settingsReady.value)
@@ -337,7 +340,10 @@ async function createTable() {
     maxPlayers: maxPlayers.value,
     privateTable: privateTable.value,
     aiPlayers: privateTable.value ? aiPlayers.value : 0,
-    buyIn: Number(buyIn.value)
+    buyIn: Number(buyIn.value),
+    squidGame: squidGame.value,
+    squidMarkerCount: squidGame.value ? Number(squidMarkerCount.value) : null,
+    squidPenaltyBigBlinds: squidGame.value ? Number(squidPenaltyBigBlinds.value) : null
     })
     remember(session)
   }) } finally { seatPending.value = false }
@@ -488,6 +494,10 @@ async function settle(open) {
 
 async function showCards() {
   await updateTable((id, viewer, token) => api.showCards(id, viewer, token))
+}
+
+async function settleSquid() {
+  await updateTable((id, viewer, token) => api.settleSquid(id, viewer, token))
 }
 
 async function action(payload) {
@@ -708,7 +718,7 @@ onBeforeUnmount(() => {
 <template>
   <PokerRoom v-if="table" :table="table" :player-id="playerId" :advice="advice"
     :busy="busy" :connected="connected && tableSynced" :refreshing="refreshing" :emote-event="emoteEvent"
-    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" @settle-leave="settleLeave" @settle="settle" @show-cards="showCards" @refresh="refresh" />
+    @action="action" @chips="adjustChips" @start="start" @emote="sendEmote" @leave="leave" @settle-leave="settleLeave" @settle="settle" @show-cards="showCards" @settle-squid="settleSquid" @refresh="refresh" />
   <main v-else class="lobby-shell">
     <nav class="brand">
       <div class="brand-lockup">
@@ -765,6 +775,12 @@ onBeforeUnmount(() => {
           <div class="create-advanced-body">
             <label>牌桌名称<input v-model="tableName" maxlength="30" required /></label>
             <label v-if="privateTable">AI 选手数量<select v-model.number="aiPlayers"><option v-for="n in maxPlayers - 1" :key="n" :value="n">{{ n }} 位 AI</option></select></label>
+            <label class="squid-toggle"><input v-model="squidGame" type="checkbox" /><span>支持鱿鱼游戏</span></label>
+            <div v-if="squidGame" class="squid-options">
+              <label>鱿鱼标记数量<input v-model.number="squidMarkerCount" type="number" min="2" max="60" step="1" required /></label>
+              <label>罚金（每个 BB）<input v-model.number="squidPenaltyBigBlinds" type="number" min="1" max="100" step="1" required /></label>
+              <p>唯一赢下主池的玩家拿 1 个标记；标记发完后没有标记的人当鱿鱼，赔付给每个有标记的玩家各 {{ squidPenaltyBigBlinds }} 个 BB（AI 座位同样参与）。</p>
+            </div>
             <p>允许带入 {{ tableSettings.minBuyIn }}–{{ tableSettings.maxBuyIn }}，当前可用 {{ availableBalance }} 筹码。</p>
           </div>
         </details>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { callAmount, canAllIn, canAutoStartNextHand, canStart, minimumRaiseTo,
-  playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, topUpWaitPrompt, validRaise } from './rules'
+import { callAmount, canAllIn, canAutoStartNextHand, canStart, isSquidPayer, minimumRaiseTo,
+  playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, squidPenaltyPending,
+  squidPenaltyPrompt, topUpWaitPrompt, validRaise } from './rules'
 
 describe('poker action rules', () => {
   const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{ chips: 1000 }, { chips: 1000 }] }
@@ -109,3 +110,33 @@ describe('poker action rules', () => {
   })
 })
 
+
+describe('鱿鱼游戏规则', () => {
+  const waitingTable = { phase: 'SHOWDOWN', currentBet: 0, minRaise: 20, minBuyIn: 1000,
+    players: [{ chips: 1000 }, { chips: 1000 }] }
+
+  it('blocks the next hand while a squid penalty is pending', () => {
+    const pending = { ...waitingTable, squid: { penaltyPending: true } }
+    expect(canStart(pending)).toBe(false)
+    expect(squidPenaltyPending(pending)).toBe(true)
+    expect(canStart(waitingTable)).toBe(true)
+    expect(squidPenaltyPending(waitingTable)).toBe(false)
+    expect(squidPenaltyPending({})).toBe(false)
+    expect(squidPenaltyPending(null)).toBe(false)
+  })
+
+  it('builds a penalty prompt from the server state', () => {
+    const pending = { squid: { penaltyPending: true, penaltyPrompt: 'Bob 需要赔付' } }
+    expect(squidPenaltyPrompt(pending)).toBe('Bob 需要赔付')
+    expect(squidPenaltyPrompt({ squid: { penaltyPending: true } })).toContain('补码')
+    expect(squidPenaltyPrompt(waitingTable)).toBeNull()
+  })
+
+  it('knows which player still owes chips', () => {
+    const pending = { squid: { penaltyPending: true } }
+    expect(isSquidPayer(pending, { squidDebt: 60 })).toBe(true)
+    expect(isSquidPayer(pending, { squidDebt: 0 })).toBe(false)
+    expect(isSquidPayer(waitingTable, { squidDebt: 60 })).toBe(false)
+    expect(isSquidPayer(pending, null)).toBe(false)
+  })
+})

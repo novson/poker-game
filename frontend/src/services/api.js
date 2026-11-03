@@ -76,6 +76,10 @@ export const api = {
   settle: (tableId, playerId, reconnectToken, open) => request(`/api/tables/${tableId}/settlement`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken, open })
   }),
+  // 鱿鱼赔付结算：鱿鱼补码后调用，把欠款付给有标记的玩家
+  settleSquid: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/squid/settle`, {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
+  }),
   adminSettings: (token) => request('/api/admin/settings', {
     headers: { 'X-Admin-Token': token }
   }),

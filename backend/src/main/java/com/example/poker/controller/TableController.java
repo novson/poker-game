@@ -30,7 +30,8 @@ public class TableController {
     @ResponseStatus(HttpStatus.CREATED)
     public TableViews.SessionView create(@Valid @RequestBody Requests.CreateTable request) {
         return service.create(request.tableName(), request.nickname(), request.accountId(), request.accountToken(),
-                request.maxPlayers(), request.privateTable(), request.aiPlayers(), request.buyIn());
+                request.maxPlayers(), request.privateTable(), request.aiPlayers(), request.buyIn(),
+                request.squidGame(), request.squidMarkerCount(), request.squidPenaltyBigBlinds());
     }
 
     @PostMapping("/{tableId}/join")
@@ -96,6 +97,13 @@ public class TableController {
     public TableViews.TableView cashOut(@PathVariable UUID tableId,
                                         @Valid @RequestBody Requests.ChipCommand request) {
         return service.cashOut(tableId, request.playerId(), request.reconnectToken(), request.amount());
+    }
+
+    /** 鱿鱼赔付结算：鱿鱼补码后调用，把欠款付给有标记的玩家。 */
+    @PostMapping("/{tableId}/squid/settle")
+    public TableViews.TableView settleSquid(@PathVariable UUID tableId,
+                                            @Valid @RequestBody Requests.PlayerCommand request) {
+        return service.settleSquidPenalty(tableId, request.playerId(), request.reconnectToken());
     }
 
     @PostMapping("/{tableId}/emotes")

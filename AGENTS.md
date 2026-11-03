@@ -871,6 +871,43 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/api/admin/settin
 
 `service/AccountService.java`（统计写入）+ `dto/AccountViews.java`（出参）+ `frontend/src/services/account.js` / `App.vue`。**必须兼容旧 `accounts.json`**：反序列化时为缺失字段给默认值（`0` / 空数组），否则老存档会读出 null。战绩按「牌桌 + 手数」去重（§3.6）。
 
+### 12.9 鱿鱼游戏（2026-11-04 上线）
+
+**规则**（用户 2026-11-03 定稿）：
+
+- 唯一赢下**主池**的玩家拿 1 个鱿鱼标记；**主池平分不发**，**只赢边池不发**。
+- 标记可以**累计**（同一玩家多手连赢就多个）。
+- 标记发完后，**所有没有标记的人都是鱿鱼**，要给**每个有标记的玩家各 xx BB**（AI 座位同样参与）。
+- 赔付筹码不足时**不允许开始下一局**，必须先补码并结清赔付。
+- 一轮结束后标记清空、标记池恢复，机制**重复**。
+
+**代码位置**：
+
+| 层 | 文件 | 要点 |
+|---|---|---|
+| 领域 | `domain/PokerTable.java` | `squidGame/squidMarkerTotal/squidPenaltyBigBlinds` 配置；`grantSquidMarker()` 发标记；`resolveSquidRound()` 判鱿鱼；`applySquidPayments()` 执行赔付；`settleSquidPenalty()` 补码后结清；`ensureNoPendingSquidPenalty()` 卡开局 |
+| 领域 | `domain/SquidObligation.java` | 一笔「鱿鱼 → 收赔付的人」未结清义务 |
+| 领域 | `domain/PlayerState.java` | `squidMarkers`（累计）、`transferChips()`（赔付转移，不计入下注） |
+| DTO | `dto/Requests.java` | `squidGame` / `squidMarkerCount`(2–60) / `squidPenaltyBigBlinds`(1–100) |
+| DTO | `dto/TableViews.java` | `TableView.squid`（`SquidView`）、`PlayerView.squidMarkers/squidId/squidDebt` |
+| 接口 | `POST /api/tables/{id}/squid/settle` | 鱿鱼补码后调用结清赔付 |
+| 前端 | `services/rules.js` | `squidPenaltyPending()`、`squidPenaltyPrompt()`、`isSquidPayer()`；**`canStart()` 在赔付挂账时返回 false** |
+| 前端 | `components/PokerRoom.vue` | `.squid-panel` 面板、座位上的标记/鱿鱼徽标、`settle-squid` 事件 |
+| 前端 | `App.vue` | 建桌表单「支持鱿鱼游戏」复选框 + 标记数 + 罚金 BB |
+
+**易错点**：
+
+- **主池 = `potIndex == 0`**：`showdown()` 里 `potIndex++` 之后才判断，所以发标记的判断要放在 `potIndex++` **之前**。
+- **无人争抢获胜**（`awardUncontested`）也是唯一赢家赢主池，**要发标记**。
+- **标记和鱿鱼名单要留到下一局开始才清空**（`squidRoundResolved` 标志），否则结果画面看不到「谁拿了几个标记 / 谁被判鱿鱼」。清空动作在 `start()` 里做。
+- **赔付在每手结束时立刻执行**（能付多少付多少），付不完的部分记成 `squidObligations` 挂账。
+- 赔付会**改变桌上筹码**，但不影响下注额（`transferChips()` 不动 `streetBet/handBet`）。
+
+**测试**：`backend/.../domain/PokerTableSquidTest.java`（11 例）、
+`frontend/src/components/PokerRoom.squid.test.js`（7 例）、
+`frontend/src/services/rules.test.js`（3 例）。
+端到端冒烟脚本：`.workbuddy/smoke_squid.py`（需先起隔离实例，见 §13.12）。
+
 ## 13. 已知陷阱与排查
 
 ### 13.1 `SERVER_PORT` 被环境变量污染 → 后端随机端口
@@ -1015,7 +1052,7 @@ Do not commit `.env` files, credentials, admin tokens, or SSH keys. Configure al
 
 ### 14.1 流程
 
-1. **test-backend / test-frontend**：云端并行跑 `mvn -B test`（73 例）与 `npm ci && npm test`（93 例），全部在 GitHub runner 上，服务器零负载。
+1. **test-backend / test-frontend**：云端并行跑 `mvn -B test`（84 例）与 `npm ci && npm test`（103 例），全部在 GitHub runner 上，服务器零负载。
 2. **build**：全绿后 `mvn -DskipTests package` + `npm run build`，上传 `deploy-bundle` artifact（jar + dist，保留 7 天）。同时用 `git diff <before> HEAD` 判断是否改到 `backend/`，输出 `backend-changed`。
 3. **deploy-frontend**：**总是执行、全自动**。打包 dist → scp → 服务器上备份旧 dist 到 `/opt/poker-game/backups/<时间戳>-actions-frontend/` → 原子换目录。不重启后端，不清牌局。
 4. **deploy-backend**：仅当 `backend-changed == true` 才执行，且挂在 `environment: production` 上——**需要到 Actions 页面点 "Review deployments" 人工确认**（保护规则已配置，reviewer 是 novson）。确认后：备份旧 jar → 替换 → `systemctl restart poker-game` → 轮询 `/actuator/health` 最多 60 秒，失败自动打出 `journalctl` 最后 50 行。

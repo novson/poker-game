@@ -35,7 +35,13 @@ public final class Requests {
             @Min(2) @Max(6) Integer maxPlayers,
             Boolean privateTable,
             @Min(0) @Max(5) Integer aiPlayers,
-            @Min(1) @Max(10_000_000) Integer buyIn) {}
+            @Min(1) @Max(10_000_000) Integer buyIn,
+            /** 是否开启鱿鱼游戏。 */
+            Boolean squidGame,
+            /** 一轮里桌上总共发多少个鱿鱼标记（2–60）。 */
+            @Min(2) @Max(60) Integer squidMarkerCount,
+            /** 鱿鱼赔付：给每个有标记的玩家赔多少个 BB（1–100）。 */
+            @Min(1) @Max(100) Integer squidPenaltyBigBlinds) {}
 
     public record JoinTable(@NotBlank @Size(max = 16) String nickname,
                             UUID accountId,

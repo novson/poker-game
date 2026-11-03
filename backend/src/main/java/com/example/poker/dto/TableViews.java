@@ -30,7 +30,16 @@ public final class TableViews {
                              int streetBet, int handBet,
                              String status, boolean ai, boolean dealer, boolean currentTurn, boolean canRaise,
                              boolean winner, List<String> bestCards, List<String> cards,
-                             boolean leaving, boolean timedOut) {}
+                             boolean leaving, boolean timedOut,
+                             int squidMarkers, boolean squidId, int squidDebt) {}
+
+    /** 鱿鱼游戏状态：桌上还剩多少标记、赔付欠了多少。 */
+    public record SquidView(boolean enabled, int markerTotal, int markersRemaining, int penaltyBigBlinds,
+                            int penaltyAmount, int round, boolean penaltyPending, String penaltyPrompt,
+                            List<SquidPlayer> players) {}
+
+    /** 一个玩家在鱿鱼游戏里的状态。 */
+    public record SquidPlayer(UUID id, String nickname, int markers, boolean squidId, int debt) {}
 
     /** 本局试算里一个人的账面：入座本金、当前筹码、整场盈亏。 */
     public record SettlementPlayer(UUID id, String nickname, boolean ai, boolean owner,
@@ -61,7 +70,8 @@ public final class TableViews {
                             List<Integer> pots, String message,
                             List<String> communityCards, List<PlayerView> players, long version,
                             long showdownHoldUntil, boolean canShowCards, boolean isOwner,
-                            boolean settlementOpen, boolean canSettle, SettlementView settlement) {
+                            boolean settlementOpen, boolean canSettle, SettlementView settlement,
+                            SquidView squid) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
             List<PlayerView> playerViews = table.players().stream().map(player -> {
@@ -77,7 +87,8 @@ public final class TableViews {
                         player.ai(), player.seat() == table.dealerSeat(), player.seat() == table.currentTurnSeat(),
                         player.raiseAllowed(), table.showdownWinner(player.id()),
                         table.showdownBestCards(player.id()).stream().map(Card::toString).toList(), cards,
-                        player.leaving(), player.timedOut());
+                        player.leaving(), player.timedOut(),
+                        player.squidMarkers(), table.squidId(player.id()), table.squidDebt(player.id()));
             }).toList();
             return new TableView(table.id(), table.name(), table.maxPlayers(), table.privateTable(),
                     table.totalChips(), table.minBuyIn(), table.defaultBuyIn(), table.maxBuyIn(),
@@ -89,7 +100,19 @@ public final class TableViews {
                     table.showdownHoldUntilEpochMillis(), table.canShowCards(viewerId),
                     table.isOwner(viewerId),
                     table.settlementOpen(), table.canSettle(viewerId),
-                    table.settlementOpen() ? SettlementView.from(table.settlementPlan()) : null);
+                    table.settlementOpen() ? SettlementView.from(table.settlementPlan()) : null,
+                    squidView(table));
+        }
+
+        private static SquidView squidView(PokerTable table) {
+            if (!table.squidGame()) return null;
+            List<SquidPlayer> players = table.players().stream()
+                    .map(player -> new SquidPlayer(player.id(), player.nickname(), player.squidMarkers(),
+                            table.squidId(player.id()), table.squidDebt(player.id())))
+                    .toList();
+            return new SquidView(true, table.squidMarkerTotal(), table.squidMarkersRemaining(),
+                    table.squidPenaltyBigBlinds(), table.squidPenaltyAmount(), table.squidRound(),
+                    table.squidPenaltyPending(), table.squidPenaltyPrompt(), players);
         }
     }
 
