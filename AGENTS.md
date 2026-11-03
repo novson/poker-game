@@ -1068,6 +1068,38 @@ Do not commit `.env` files, credentials, admin tokens, or SSH keys. Configure al
 
 - **只改前端**：push 后等全绿即上线，无需任何人工操作。
 - **改了后端**：push 后等测试/build 完，去 Actions 运行页点 **Review deployments → production → Approve and deploy**；确认后自动重启并健康检查。
+  也可以直接走 API 自行批准（不用点网页）：
+  ```bash
+  RUN=<run_id>
+  ENV_ID=$(gh api repos/:owner/:repo/actions/runs/$RUN/pending_deployments --jq '.[0].environment.id')
+  printf '{"environment_ids":[%s],"state":"approved","comment":"approve"}' "$ENV_ID" > /tmp/approve.json
+  gh api -X POST repos/:owner/:repo/actions/runs/$RUN/pending_deployments --input /tmp/approve.json
+  ```
+  注意：参数是 `state`（不是 `action`），且必须用 `--input` 传 JSON body。
 - **回滚**：服务器上从 `/opt/poker-game/backups/<时间戳>-actions-*/` 取旧 dist/jar 还原；jar 回滚后记得 `systemctl restart poker-game`。
 - **重跑**：Actions 页面 Re-run failed jobs 即可，前端部署是幂等的（先备份后替换）。
 - 并发控制：同一分支新 push 会取消还在跑的旧 run（`concurrency` 配置），不会出现旧产物覆盖新产物。
+
+### 14.4 生产环境事实核对（2026-11-04）
+
+- **对外端口是 80**（nginx），不是 8088。站点配置在 `/etc/nginx/default.d/poker-game.conf`
+  （`/etc/nginx/conf.d/` 是空的）：`root /opt/poker-game/frontend/dist`，
+  `/api/` 与 `/ws` 反代到 `http://127.0.0.1:18080`。
+- 后端 systemd 单元 `poker-game.service`，drop-in `admin.conf` 引入 `/etc/poker-game.env`
+  （含 `POKER_ADMIN_TOKEN`）并设 `StateDirectory=poker-game`。
+- 服务器默认 `java` 是 **JDK 8**，跑不了 Spring Boot 3 的 jar（`UnsupportedClassVersionError`）。
+  要手动起实例必须用 systemd 那个 JDK17：
+  `/usr/lib/jvm/java-17-alibaba-dragonwell-17.0.19.0.20.10-1.alnx4.x86_64/bin/java`。
+- **在服务器上做隔离冒烟**（用线上这份 jar，不污染生产）：
+  ```bash
+  SERVER_PORT=18083 STATE_DIRECTORY=/tmp/squid-smoke-state \
+    nohup /usr/lib/jvm/java-17-alibaba-dragonwell-*.x86_64/bin/java \
+    -Xms128m -Xmx512m -jar /opt/poker-game/backend/target/poker-backend-1.0.0.jar \
+    > /tmp/smoke.log 2>&1 &
+  ```
+  结束后**按 PID kill**——`ps | grep 18083` 匹配不到（命令行里没有端口号），
+  用 `ps -eo pid,args | grep '[p]oker-backend'` 拿 PID 再 `kill`。
+- 部署后核对三件事：
+  1. `curl -s http://127.0.0.1:18080/actuator/health` → `{"status":"UP"}`
+  2. `ls -la /opt/poker-game/backend/target/poker-backend-1.0.0.jar` 的时间戳是本次构建时间
+  3. 线上 `assets/index-*.js` 里能 grep 到本次新增的标识串（如 `squidMarkerCount`）
