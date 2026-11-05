@@ -311,6 +311,94 @@ class PokerTableSquidTest {
         });
     }
 
+    @Test
+    void theSettlementDetailsShowWhoPaysWhomAndHowMuch() {
+        PokerTable table = squidTable(3, 50_000, 2, 4);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+        PlayerState carol = table.join("Carol");
+
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, carol);
+
+        // Bob 和 Carol 各拿 1 个标记 → Alice 是鱿鱼，要赔给他们两个人
+        var settlements = table.squidObligations();
+        assertThat(settlements).hasSize(2);
+        assertThat(settlements).allSatisfy(obligation -> {
+            assertThat(obligation.squidId()).isEqualTo(alice.id());
+            assertThat(obligation.total()).isEqualTo(80);
+            assertThat(obligation.paid()).isEqualTo(80);
+            assertThat(obligation.amount()).isZero();
+            assertThat(obligation.settled()).isTrue();
+        });
+        assertThat(settlements).extracting(SquidObligation::recipientId)
+                .containsExactlyInAnyOrder(bob.id(), carol.id());
+    }
+
+    @Test
+    void theSettlementDetailsSurviveUntilTheNextHandStarts() {
+        PokerTable table = squidTable(2, 50_000, 2, 3);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, bob);
+
+        // 赔付已完成，但明细要留到下一局开始才清空，结果画面才看得到
+        assertThat(table.squidObligations()).hasSize(1);
+        assertThat(table.squidObligations().get(0).squidId()).isEqualTo(alice.id());
+        assertThat(table.squidObligations().get(0).recipientId()).isEqualTo(bob.id());
+        assertThat(table.squidObligations().get(0).total()).isEqualTo(60);
+
+        table.start(bob.id());
+        assertThat(table.squidObligations()).isEmpty();
+    }
+
+    @Test
+    void anUnsettledPenaltyKeepsItsOutstandingAmountInTheDetails() {
+        // 罚金 50 BB = 1000 筹码，鱿鱼桌上只有 200 筹码 → 只赔得起一部分
+        PokerTable table = squidTable(2, 50_000, 2, 50);
+        PlayerState alice = table.join("Alice", 200);
+        PlayerState bob = table.join("Bob");
+
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, bob);
+
+        assertThat(table.squidPenaltyPending()).isTrue();
+        var obligation = table.squidObligations().get(0);
+        assertThat(obligation.total()).isEqualTo(1_000);
+        assertThat(obligation.paid()).isGreaterThan(0);
+        assertThat(obligation.amount()).isGreaterThan(0);
+        assertThat(obligation.settled()).isFalse();
+    }
+
+    @Test
+    void theTableViewExposesTheSettlementDetails() {
+        PokerTable table = squidTable(2, 50_000, 2, 3);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, bob);
+
+        var view = com.example.poker.dto.TableViews.TableView.from(table, alice.id());
+        assertThat(view.squid().settlements()).hasSize(1);
+        var settlement = view.squid().settlements().get(0);
+        assertThat(settlement.squid()).isEqualTo("Alice");
+        assertThat(settlement.recipient()).isEqualTo("Bob");
+        assertThat(settlement.amount()).isEqualTo(60);
+        assertThat(settlement.paid()).isEqualTo(60);
+        assertThat(settlement.outstanding()).isZero();
+        assertThat(settlement.settled()).isTrue();
+    }
+
     private static Card card(Rank rank, Suit suit) {
         return new Card(rank, suit);
     }

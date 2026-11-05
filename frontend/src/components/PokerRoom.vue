@@ -120,6 +120,10 @@ const waitingForOwner = computed(() => startReady.value && !startButtonVisible.v
 const squidPending = computed(() => squidPenaltyPending(props.table))
 const squidPendingText = computed(() => squidPenaltyPrompt(props.table))
 const mySquidDebt = computed(() => me.value?.squidDebt || 0)
+// 一轮结束后的赔付结算框：逐条显示「谁赔给谁多少罚金」
+const squidSettlements = computed(() => props.table?.squid?.settlements || [])
+const squidSettlementTotal = computed(() =>
+  squidSettlements.value.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
 const canSettle = computed(() => Boolean(props.table.canSettle))
 const settlement = computed(() => props.table.settlement || null)
@@ -514,6 +518,26 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <p v-if="squidPendingText" class="squid-warning" role="alert">{{ squidPendingText }}</p>
+      <div v-if="squidSettlements.length" class="squid-settlement-box" aria-label="鱿鱼赔付结算">
+        <header>
+          <span class="squid-settlement-title">🐙 本轮赔付结算</span>
+          <span class="squid-settlement-total">共 {{ squidSettlementTotal }} 筹码</span>
+        </header>
+        <ul class="squid-settlement-list">
+          <li v-for="item in squidSettlements" :key="`${item.squidId}-${item.recipientId}`"
+            class="squid-settlement-row" :class="{ pending: !item.settled }">
+            <span class="squid-settlement-flow">
+              <strong class="squid-payer">{{ item.squid }}</strong>
+              <span class="squid-arrow" aria-hidden="true">→</span>
+              <strong class="squid-recipient">{{ item.recipient }}</strong>
+            </span>
+            <span class="squid-settlement-amount">{{ item.amount }} 筹码</span>
+            <span class="squid-settlement-state" :class="{ pending: !item.settled }">
+              {{ item.settled ? '已赔付' : `已赔 ${item.paid}，还欠 ${item.outstanding}` }}
+            </span>
+          </li>
+        </ul>
+      </div>
       <button v-if="mySquidDebt > 0" class="gold squid-settle" type="button" :disabled="busy || !connected"
         @click="emit('settle-squid')">结算鱿鱼赔付 {{ mySquidDebt }} 筹码</button>
     </section>

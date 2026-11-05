@@ -36,10 +36,14 @@ public final class TableViews {
     /** 鱿鱼游戏状态：桌上还剩多少标记、赔付欠了多少。 */
     public record SquidView(boolean enabled, int markerTotal, int markersRemaining, int penaltyBigBlinds,
                             int penaltyAmount, int round, boolean penaltyPending, String penaltyPrompt,
-                            List<SquidPlayer> players) {}
+                            List<SquidPlayer> players, List<SquidSettlement> settlements) {}
 
     /** 一个玩家在鱿鱼游戏里的状态。 */
     public record SquidPlayer(UUID id, String nickname, int markers, boolean squidId, int debt) {}
+
+    /** 一笔鱿鱼赔付明细：某个鱿鱼赔给某个玩家多少罚金。 */
+    public record SquidSettlement(UUID squidId, String squid, UUID recipientId, String recipient,
+                                  int amount, int paid, int outstanding, boolean settled) {}
 
     /** 本局试算里一个人的账面：入座本金、当前筹码、整场盈亏。 */
     public record SettlementPlayer(UUID id, String nickname, boolean ai, boolean owner,
@@ -110,9 +114,20 @@ public final class TableViews {
                     .map(player -> new SquidPlayer(player.id(), player.nickname(), player.squidMarkers(),
                             table.squidId(player.id()), table.squidDebt(player.id())))
                     .toList();
+            List<SquidSettlement> settlements = table.squidObligations().stream()
+                    .map(obligation -> new SquidSettlement(obligation.squidId(),
+                            nicknameOf(table, obligation.squidId()),
+                            obligation.recipientId(), nicknameOf(table, obligation.recipientId()),
+                            obligation.total(), obligation.paid(), obligation.amount(), obligation.settled()))
+                    .toList();
             return new SquidView(true, table.squidMarkerTotal(), table.squidMarkersRemaining(),
                     table.squidPenaltyBigBlinds(), table.squidPenaltyAmount(), table.squidRound(),
-                    table.squidPenaltyPending(), table.squidPenaltyPrompt(), players);
+                    table.squidPenaltyPending(), table.squidPenaltyPrompt(), players, settlements);
+        }
+
+        private static String nicknameOf(PokerTable table, UUID playerId) {
+            return table.players().stream().filter(player -> player.id().equals(playerId))
+                    .map(com.example.poker.domain.PlayerState::nickname).findFirst().orElse("未知玩家");
         }
     }
 

@@ -15,7 +15,7 @@ function squidState(extra = {}) {
     players: [
       { id: 'me', nickname: 'Alice', markers: 2, squidId: false, debt: 0 },
       { id: 'bob', nickname: 'Bob', markers: 0, squidId: false, debt: 0 }
-    ], ...extra }
+    ], settlements: [], ...extra }
 }
 
 function tableWith(extra = {}) {
@@ -150,5 +150,55 @@ describe('鱿鱼游戏', () => {
     }))
     await nextTick()
     expect(root.querySelector('.squid-settle')).toBeNull()
+  })
+
+  it('shows the settlement box with who pays whom', async () => {
+    mountRoom(tableWith({
+      squid: squidState({
+        settlements: [
+          { squidId: 'bob', squid: 'Bob', recipientId: 'me', recipient: 'Alice',
+            amount: 60, paid: 60, outstanding: 0, settled: true },
+          { squidId: 'bob', squid: 'Bob', recipientId: 'carol', recipient: 'Carol',
+            amount: 60, paid: 60, outstanding: 0, settled: true }
+        ]
+      })
+    }))
+    await nextTick()
+    const box = root.querySelector('.squid-settlement-box')
+    expect(box).not.toBeNull()
+    expect(box.textContent).toContain('本轮赔付结算')
+    expect(box.textContent).toContain('共 120 筹码')
+    const rows = [...root.querySelectorAll('.squid-settlement-row')]
+    expect(rows).toHaveLength(2)
+    expect(rows[0].textContent).toContain('Bob')
+    expect(rows[0].textContent).toContain('Alice')
+    expect(rows[0].textContent).toContain('60 筹码')
+    expect(rows[0].textContent).toContain('已赔付')
+    expect(rows[1].textContent).toContain('Carol')
+  })
+
+  it('shows the outstanding amount while the penalty is not settled', async () => {
+    mountRoom(tableWith({
+      squid: squidState({
+        penaltyPending: true,
+        penaltyPrompt: 'Bob 需要赔付（每人 60 筹码）才能开始下一局',
+        settlements: [
+          { squidId: 'bob', squid: 'Bob', recipientId: 'me', recipient: 'Alice',
+            amount: 60, paid: 20, outstanding: 40, settled: false }
+        ]
+      })
+    }))
+    await nextTick()
+    const row = root.querySelector('.squid-settlement-row')
+    expect(row).not.toBeNull()
+    expect(row.classList.contains('pending')).toBe(true)
+    expect(row.textContent).toContain('已赔 20')
+    expect(row.textContent).toContain('还欠 40')
+  })
+
+  it('hides the settlement box when the round has no penalty yet', async () => {
+    mountRoom(tableWith())
+    await nextTick()
+    expect(root.querySelector('.squid-settlement-box')).toBeNull()
   })
 })

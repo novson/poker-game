@@ -385,7 +385,7 @@ public final class PokerTable {
     public int squidDebt(UUID playerId) { return squidDebt.getOrDefault(playerId, 0); }
     /** 本轮这个人是不是被判成了鱿鱼。 */
     public boolean squidId(UUID playerId) { return squidIds.contains(playerId); }
-    /** 本轮未结清的赔付明细。 */
+    /** 本轮的赔付明细（含已结清的），用于结果画面的结算框。 */
     public List<SquidObligation> squidObligations() { return List.copyOf(squidObligations); }
     /** 是不是牌桌创建人（第一个入座的人）。公开桌的「开始下一局」只给 TA 显示。 */
     public boolean isOwner(UUID playerId) {
@@ -776,17 +776,16 @@ public final class PokerTable {
                 obligation.settle(payable);
             }
         }
-        squidObligations.removeIf(obligation -> obligation.amount() <= 0);
 
         for (SquidObligation obligation : squidObligations) {
             squidDebt.merge(obligation.squidId(), obligation.amount(), Integer::sum);
         }
-        squidPenaltyPending = !squidObligations.isEmpty();
+        squidPenaltyPending = squidDebt.values().stream().anyMatch(amount -> amount > 0);
         if (squidPenaltyPending) {
             appendSquidNotice("鱿鱼赔付未结清（" + squidIdNames() + "），必须先补齐才能开始下一局");
         } else {
-            // 本轮已判定完，但标记和鱿鱼名单要留到下一局开始才清空，
-            // 这样结果画面还能看到「谁拿了几 个标记 / 谁被判鱿鱼」。
+            // 本轮已判定完，但标记、鱿鱼名单和赔付明细要留到下一局开始才清空，
+            // 这样结果画面还能看到「谁拿了几个标记 / 谁被判鱿鱼 / 谁赔了谁多少」。
             squidRoundResolved = true;
             appendSquidNotice("鱿鱼赔付已完成（" + squidIdNames() + "）");
         }
@@ -838,12 +837,11 @@ public final class PokerTable {
             }
         }
         if (!touched) return false;
-        squidObligations.removeIf(obligation -> obligation.amount() <= 0);
         squidDebt.clear();
         for (SquidObligation obligation : squidObligations) {
             squidDebt.merge(obligation.squidId(), obligation.amount(), Integer::sum);
         }
-        squidPenaltyPending = !squidObligations.isEmpty();
+        squidPenaltyPending = squidDebt.values().stream().anyMatch(amount -> amount > 0);
         if (squidPenaltyPending) {
             message = "鱿鱼赔付仍未结清，请补码后再次结算";
         } else {

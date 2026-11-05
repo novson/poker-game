@@ -427,6 +427,21 @@ input[aria-invalid="true"] { border-color: #b97164; }
 .squid-chip.squid small { color: #ffb19f; }
 .squid-warning { margin: 0; padding: 7px 10px; color: #ffd0c0; background: rgba(226,87,60,.16); border: 1px solid rgba(226,87,60,.42); border-radius: 8px; font-size: 10px; line-height: 1.5; }
 .squid-settle { justify-self: start; padding: 7px 14px; font-size: 11px; }
+.squid-settlement-box { padding: 9px 11px; background: rgba(0,0,0,.28); border: 1px solid var(--line-soft); border-radius: 9px; display: grid; gap: 6px; }
+.squid-settlement-box > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.squid-settlement-title { color: #ffd9e6; font: 800 11px/1 var(--font-ui); letter-spacing:.03em; }
+.squid-settlement-total { color: var(--gold-1); font: 800 11px/1 var(--font-numeric); }
+.squid-settlement-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.squid-settlement-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 12px; padding: 5px 8px; background: rgba(255,255,255,.035); border: 1px solid var(--line-soft); border-radius: 7px; font-size: 10px; }
+.squid-settlement-row.pending { background: rgba(226,87,60,.1); border-color: rgba(226,87,60,.42); }
+.squid-settlement-flow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.squid-settlement-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.squid-payer { color: #ffb19f; }
+.squid-recipient { color: #ffc0d5; }
+.squid-arrow { color: var(--ink-4); }
+.squid-settlement-amount { color: var(--gold-1); font: 800 11px/1 var(--font-numeric); white-space: nowrap; }
+.squid-settlement-state { color: var(--ink-3); font-size: 9px; white-space: nowrap; }
+.squid-settlement-state.pending { color: #ffd0c0; }
 .sound-panel { position: fixed; z-index: 75; top: 64px; right: 20px; width: min(330px,calc(100vw - 24px)); padding: 15px; color: var(--ink-2); background: rgba(5,27,22,.97); border: 1px solid rgba(214,173,88,.32); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); backdrop-filter: blur(18px); }
 .sound-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
 .sound-panel > header strong { color: var(--ink-1); font-size: 17px; }
