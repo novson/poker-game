@@ -399,6 +399,27 @@ class PokerTableSquidTest {
         assertThat(settlement.settled()).isTrue();
     }
 
+    @Test
+    void settlingThePenaltyKeepsTheHandResultInTheMessage() {
+        PokerTable table = squidTable(2, 50_000, 2, 50);
+        PlayerState alice = table.join("Alice", 200);
+        PlayerState bob = table.join("Bob");
+
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, bob);
+        assertThat(table.squidPenaltyPending()).isTrue();
+
+        table.topUp(alice.id(), 2_000);
+        String messageBefore = table.message();
+        table.settleSquidPenalty(alice.id());
+
+        // 结清提示要追加在原消息后面，不能把本手结果覆盖掉
+        assertThat(table.message()).contains("鱿鱼赔付已结清");
+        assertThat(table.message()).startsWith(messageBefore);
+    }
+
     private static Card card(Rank rank, Suit suit) {
         return new Card(rank, suit);
     }

@@ -1061,23 +1061,29 @@ Do not commit `.env` files, credentials, admin tokens, or SSH keys. Configure al
 
 ### 14.1 流程
 
-1. **test-backend / test-frontend**：云端并行跑 `mvn -B test`（88 例）与 `npm ci && npm test`（106 例），全部在 GitHub runner 上，服务器零负载。
+1. **test-backend / test-frontend**：云端并行跑 `mvn -B test`（89 例）与 `npm ci && npm test`（106 例），全部在 GitHub runner 上，服务器零负载。
 2. **build**：全绿后 `mvn -DskipTests package` + `npm run build`，上传 `deploy-bundle` artifact（jar + dist，保留 7 天）。同时用 `git diff <before> HEAD` 判断是否改到 `backend/`，输出 `backend-changed`。
 3. **deploy-frontend**：**总是执行、全自动**。打包 dist → scp → 服务器上备份旧 dist 到 `/opt/poker-game/backups/<时间戳>-actions-frontend/` → 原子换目录。不重启后端，不清牌局。
-4. **deploy-backend**：仅当 `backend-changed == true` 才执行，且挂在 `environment: production` 上——**需要到 Actions 页面点 "Review deployments" 人工确认**（保护规则已配置，reviewer 是 novson）。确认后：备份旧 jar → 替换 → `systemctl restart poker-game` → 轮询 `/actuator/health` 最多 60 秒，失败自动打出 `journalctl` 最后 50 行。
+4. **deploy-backend**：仅当 `backend-changed == true` 才执行，挂在 `environment: production` 上。
+   **2026-11-06 起去掉了人工门禁**：`production` environment 只保留 `branch_policy`
+   （自定义分支策略，仅 `main` 可部署），不再有 `required_reviewers`，`wait_timer` 为 null。
+   确认：备份旧 jar → 替换 → `systemctl restart poker-game` → 轮询 `/actuator/health` 最多 60 秒，失败自动打出 `journalctl` 最后 50 行。
 
 ### 14.2 凭据与配置
 
 - 仓库 Secret：`DEPLOY_SSH_KEY`（部署私钥 `id_ed25519_139_224_254_109` 的加密副本，服务端公钥经 libsodium sealed box 加密上传）。**换私钥要重新生成这个 Secret**。
 - 服务器凭据仍只在服务端；workflow 用 `ssh-keyscan` 做 TOFU 写入 runner 的 known_hosts，runner 是一次性的，不落盘。
-- `production` 环境保护：Settings → Environments → production，required reviewer = novson，仅 `main` 分支可部署。
+- `production` 环境保护：Settings → Environments → production，**只有分支策略**（自定义策略，仅 `main` 可部署），
+  **没有 required reviewer**（2026-11-06 移除），`wait_timer` 为空 → 推上去自动部署。
 - 构建产物 jar 名固定 `poker-backend-1.0.0.jar`；后端健康检查走 `127.0.0.1:18080`（与生产 systemd 环境一致）。
 
 ### 14.3 日常使用
 
 - **只改前端**：push 后等全绿即上线，无需任何人工操作。
-- **改了后端**：push 后等测试/build 完，去 Actions 运行页点 **Review deployments → production → Approve and deploy**；确认后自动重启并健康检查。
-  也可以直接走 API 自行批准（不用点网页）：
+- **改了后端**：push 后测试 + build 全绿即**自动部署**，无需任何人工确认
+  （`production` environment 的 `required_reviewers` 已于 2026-11-06 移除）。
+  典型耗时：推送 → 全绿 2 分 08 秒 → 部署完成再 1 分 16 秒，**合计约 3 分半**。
+  如果还想手动拦一道，走 API 批准：
   ```bash
   RUN=<run_id>
   ENV_ID=$(gh api repos/:owner/:repo/actions/runs/$RUN/pending_deployments --jq '.[0].environment.id')

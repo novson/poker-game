@@ -843,11 +843,12 @@ public final class PokerTable {
         }
         squidPenaltyPending = squidDebt.values().stream().anyMatch(amount -> amount > 0);
         if (squidPenaltyPending) {
-            message = "鱿鱼赔付仍未结清，请补码后再次结算";
+            // 追加而不是覆盖：本手的结果消息和鱿鱼提示都要留住
+            message = message + "；鱿鱼赔付仍未结清，请补码后再次结算";
         } else {
             // 赔付结清 → 本轮可以结束，等下一局开始时重置标记、进入新一轮
             squidRoundResolved = true;
-            message = "鱿鱼赔付已结清，可以开始下一局";
+            message = message + "；鱿鱼赔付已结清，可以开始下一局";
         }
         return true;
     }
