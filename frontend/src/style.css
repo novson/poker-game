@@ -626,6 +626,8 @@ input[aria-invalid="true"] { border-color: #b97164; }
 .bankroll-actions label { margin:0; display:flex; align-items:center; gap:6px; white-space:nowrap; }
 .bankroll-actions input { width:100px; padding:7px 8px; }
 .bankroll-actions button { padding:8px 11px; color:var(--ink-2); background:rgba(22,58,48,.92); border:1px solid var(--line-mid); border-radius:6px; font-size:10px; }
+/* 「补满」：一键补到最高带入上限，和「全部回收」一样是高亮的快捷操作 */
+.bankroll-actions .top-up-max { color:var(--gold-1); border-color:rgba(214,173,88,.3); }
 .bankroll-actions .cash-all { color:var(--gold-1); border-color:rgba(214,173,88,.3); }
 .bankroll-bar > small { grid-column:1/-1; color:var(--ink-4); font-size:9px; }
 .bankroll-bar .top-up-reminder { color:#d9a66d; }
@@ -843,10 +845,11 @@ input[aria-invalid="true"] { border-color: #b97164; }
   .bankroll-bar { left:0; right:0; bottom:70px; width:100%; min-height:124px; height:124px; padding:8px 10px; grid-template-columns:1fr; gap:5px; transform:none; overflow:hidden; border-width:1px 0 0; border-radius:0; }
   .bankroll-summary { gap:4px 11px; }
   .bankroll-summary strong { font-size:12px; }
-  .bankroll-actions { width:100%; justify-self:stretch; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
+  /* 4 个按钮（补码/补满/回收/全部回收）排一行：3 列会换行，撑破固定高度 */
+  .bankroll-actions { width:100%; justify-self:stretch; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
   .bankroll-actions label { grid-column:1/-1; display:grid; grid-template-columns:auto 1fr; }
   .bankroll-actions input { width:100%; padding:6px 8px; }
-  .bankroll-actions button { min-height:34px; padding:6px 3px; }
+  .bankroll-actions button { min-height:34px; padding:6px 2px; font-size:9px; }
   .bankroll-bar > small { display:none; }
   .room-shell.between-hands:not(.chip-manager-open) .table-stage { height:calc(100dvh - 60px - 130px); }
   .room-shell.between-hands:not(.chip-manager-open) .bankroll-bar { height:60px; min-height:60px; }

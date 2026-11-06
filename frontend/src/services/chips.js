@@ -25,3 +25,17 @@ export function suggestedTopUp(table, player) {
     (Number(table?.bigBlind) || 1) * 10)
   return Math.min(bounds.maximum, desired)
 }
+
+/**
+ * 「一键补到带入上限」要补多少筹码。
+ *
+ * 目标是补满到 maxBuyIn，但备用筹码不够时只能补到备用筹码那么多。
+ * 补完还达不到最低带入（minBuyIn）的话返回 0 —— 那种情况补了也会被服务端拒绝
+ * （「补码后至少需要达到最低带入」），按钮应该直接禁用。
+ * 已经在上限时也返回 0。
+ */
+export function topUpToMax(table, player) {
+  const bounds = topUpBounds(table, player)
+  if (bounds.maximum <= 0 || bounds.maximum < bounds.minimum) return 0
+  return bounds.maximum
+}

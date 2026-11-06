@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PlayingCard from './PlayingCard.vue'
 import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
-import { canTopUpAmount, suggestedTopUp } from '../services/chips'
+import { canTopUpAmount, suggestedTopUp, topUpToMax } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
   minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, shouldAutoOpenTopUp, showdownHoldRemaining,
   squidPenaltyPrompt, squidPenaltyPending, topUpWaitPrompt, validRaise } from '../services/rules'
@@ -72,6 +72,22 @@ const betweenHands = computed(() => ['WAITING', 'SHOWDOWN'].includes(props.table
 const waitingForNextHand = computed(() => !betweenHands.value && me.value?.status === 'SITTING')
 const transferAmount = computed(() => Number(chipAmount.value) || 0)
 const canTopUp = computed(() => canTopUpAmount(props.table, me.value, transferAmount.value))
+// 「一键补满」：补到最高带入上限。备用筹码不够就补到备用筹码那么多；
+// 补完还够不到最低带入就返回 0（那种情况补了也会被服务端拒绝，按钮直接禁用）。
+const topUpMaxAmount = computed(() => topUpToMax(props.table, me.value))
+const canTopUpMax = computed(() => topUpMaxAmount.value > 0)
+// 补满按钮的悬浮说明：告诉玩家这一下会补多少、补完桌上变成多少
+const topUpMaxHint = computed(() => {
+  const amount = topUpMaxAmount.value
+  if (!amount) {
+    const chips = Number(me.value?.chips) || 0
+    if (chips >= (Number(props.table?.maxBuyIn) || 0)) return '桌上已经是最高带入，无需补码'
+    return '备用筹码不足以补到最高带入'
+  }
+  const target = (Number(me.value?.chips) || 0) + amount
+  const cap = Number(props.table?.maxBuyIn) || 0
+  return `补码 ${amount} 筹码，桌上变成 ${target}${target >= cap ? '（最高带入）' : ''}`
+})
 const canCashOut = computed(() => {
   const remaining = (me.value?.chips || 0) - transferAmount.value
   return transferAmount.value > 0 && remaining >= 0
@@ -733,6 +749,8 @@ onBeforeUnmount(() => {
       <div v-if="chipManagerOpen" class="bankroll-actions">
         <label>调整金额<input v-model.number="chipAmount" type="number" min="1" step="1" /></label>
         <button :disabled="busy || !connected || !canTopUp" @click="transfer('TOP_UP')">补码</button>
+        <button class="top-up-max" :disabled="busy || !connected || !canTopUpMax"
+          :title="topUpMaxHint" @click="transfer('TOP_UP', topUpMaxAmount)">补满</button>
         <button :disabled="busy || !connected || !canCashOut" @click="transfer('CASH_OUT')">回收</button>
         <button class="cash-all" :disabled="busy || !connected || !me.chips" @click="transfer('CASH_OUT', me.chips)">全部回收</button>
       </div>

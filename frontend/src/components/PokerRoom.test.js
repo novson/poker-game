@@ -18,16 +18,18 @@ function tableWith(players, extra = {}) {
     canSettle: false, settlementOpen: false, settlement: null, players, ...extra }
 }
 
-let app, root, started
+let app, root, started, chipCalls
 
 function mountRoom(table, playerId = 'me') {
   root = document.createElement('div')
   document.body.append(root)
   started = []
+  chipCalls = []
   app = createApp({
     render: () => h(PokerRoom, {
       table, playerId, busy: false, connected: true, refreshing: false,
-      onStart: () => started.push(true)
+      onStart: () => started.push(true),
+      onChips: (type, amount) => chipCalls.push({ type, amount })
     })
   })
   app.mount(root)
@@ -97,6 +99,57 @@ describe('starting the next hand', () => {
     input.value = '5000'
     expect(input.validity.stepMismatch).toBe(false)
     expect(input.checkValidity()).toBe(true)
+  })
+
+  it('tops the stack up to the maximum buy-in in one click', async () => {
+    // 桌上 2000、最高带入 4000 → 「补满」一次补 2000 到 4000
+    mountRoom(tableWith([
+      seat('me', 'Alice', 2000, { reserveChips: 8000 }),
+      seat('bob', 'Bob', 1500, { reserveChips: 8500 })
+    ]))
+    root.querySelector('.chip-manager-toggle').click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const button = root.querySelector('.top-up-max')
+    expect(button).not.toBeNull()
+    expect(button.disabled).toBe(false)
+    // 悬浮说明告诉玩家这一下会补多少、补完变成多少
+    expect(button.getAttribute('title')).toContain('2000')
+    expect(button.getAttribute('title')).toContain('4000')
+
+    button.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(chipCalls).toEqual([{ type: 'TOP_UP', amount: 2000 }])
+  })
+
+  it('caps the one-click top-up at the reserve', async () => {
+    // 备用只剩 1500，补不到 4000 → 只能补 1500
+    mountRoom(tableWith([
+      seat('me', 'Alice', 1000, { reserveChips: 1500 }),
+      seat('bob', 'Bob', 1500, { reserveChips: 8500 })
+    ]))
+    root.querySelector('.chip-manager-toggle').click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const button = root.querySelector('.top-up-max')
+    expect(button.disabled).toBe(false)
+    button.click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(chipCalls).toEqual([{ type: 'TOP_UP', amount: 1500 }])
+  })
+
+  it('disables the one-click top-up when there is nothing to add', async () => {
+    // 已经在上限 → 没有可补的
+    mountRoom(tableWith([
+      seat('me', 'Alice', 4000, { reserveChips: 6000 }),
+      seat('bob', 'Bob', 1500, { reserveChips: 8500 })
+    ]))
+    root.querySelector('.chip-manager-toggle').click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const button = root.querySelector('.top-up-max')
+    expect(button.disabled).toBe(true)
+    expect(button.getAttribute('title')).toContain('已经是最高带入')
   })
 
   it('tells a player who joined mid-hand that they start next hand', async () => {
