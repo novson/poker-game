@@ -400,6 +400,58 @@ class PokerTableSquidTest {
     }
 
     @Test
+    void thePenaltySnapshotSurvivesUntilTheNextRoundIsSettled() {
+        // 赔付明细下一局开始就清空了，但「刚被罚了多少」要跨轮次留着：
+        // 前端靠它区分「筹码低是因为被罚」还是「玩家真的缺钱」，
+        // 否则下一局一开又会给刚被罚完的玩家弹补码菜单。
+        PokerTable table = squidTable(2, 50_000, 2, 3);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+
+        // 第 1 轮：bob 连赢两手把 2 个标记都拿走 → alice 被罚
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, bob);
+
+        // 本轮罚金 60 筹码，Alice 被罚
+        assertThat(table.squidPenaltyPaid(alice.id())).isEqualTo(60);
+        assertThat(table.squidPenaltyPaid(bob.id())).isZero();
+
+        // 下一局开始：赔付明细清空了，但罚金快照还在
+        table.start(bob.id());
+        assertThat(table.squidObligations()).isEmpty();
+        assertThat(table.squidPenaltyPaid(alice.id())).isEqualTo(60);
+
+        // 第 2 轮又判定出新的罚金时，快照刷新成新一轮的数字而不是累加。
+        // bob 继续连赢 → 仍是 alice 被罚。
+        foldToWinner(table, bob);
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        assertThat(table.squidPenaltyPaid(alice.id())).isEqualTo(60);
+        assertThat(table.squidPenaltyPaid(bob.id())).isZero();
+    }
+
+    @Test
+    void theTableViewExposesThePenaltySnapshot() {
+        PokerTable table = squidTable(2, 50_000, 2, 3);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+        table.start(alice.id());
+        foldToWinner(table, bob);
+        table.start(bob.id());
+        foldToWinner(table, bob);
+
+        var view = com.example.poker.dto.TableViews.TableView.from(table, bob.id());
+        var aliceState = view.squid().players().stream()
+                .filter(player -> player.id().equals(alice.id())).findFirst().orElseThrow();
+        var bobState = view.squid().players().stream()
+                .filter(player -> player.id().equals(bob.id())).findFirst().orElseThrow();
+        assertThat(aliceState.penaltyPaid()).isEqualTo(60);
+        assertThat(bobState.penaltyPaid()).isZero();
+    }
+
+    @Test
     void settlingThePenaltyKeepsTheHandResultInTheMessage() {
         PokerTable table = squidTable(2, 50_000, 2, 50);
         PlayerState alice = table.join("Alice", 200);

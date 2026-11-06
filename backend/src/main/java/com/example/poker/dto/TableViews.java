@@ -39,7 +39,8 @@ public final class TableViews {
                             List<SquidPlayer> players, List<SquidSettlement> settlements) {}
 
     /** 一个玩家在鱿鱼游戏里的状态。 */
-    public record SquidPlayer(UUID id, String nickname, int markers, boolean squidId, int debt) {}
+    public record SquidPlayer(UUID id, String nickname, int markers, boolean squidId, int debt,
+                              int penaltyPaid) {}
 
     /** 一笔鱿鱼赔付明细：某个鱿鱼赔给某个玩家多少罚金。 */
     public record SquidSettlement(UUID squidId, String squid, UUID recipientId, String recipient,
@@ -116,7 +117,8 @@ public final class TableViews {
             if (!table.squidGame()) return null;
             List<SquidPlayer> players = table.players().stream()
                     .map(player -> new SquidPlayer(player.id(), player.nickname(), player.squidMarkers(),
-                            table.squidId(player.id()), table.squidDebt(player.id())))
+                            table.squidId(player.id()), table.squidDebt(player.id()),
+                            table.squidPenaltyPaid(player.id())))
                     .toList();
             List<SquidSettlement> settlements = table.squidObligations().stream()
                     .map(obligation -> new SquidSettlement(obligation.squidId(),

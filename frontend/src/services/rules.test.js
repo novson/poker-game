@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { callAmount, canAllIn, canAutoStartNextHand, canStart, isSquidPayer, minimumRaiseTo,
-  playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, squidPenaltyPending,
-  squidPenaltyPrompt, topUpWaitPrompt, validRaise } from './rules'
+  playersNeedingTopUp, quickRaiseTo, shouldAutoOpenTopUp, showdownHoldRemaining,
+  squidPenaltyPaidBy, squidPenaltyPending, squidPenaltyPrompt, topUpWaitPrompt, validRaise } from './rules'
 
 describe('poker action rules', () => {
   const table = { phase: 'PRE_FLOP', currentBet: 40, minRaise: 20, players: [{ chips: 1000 }, { chips: 1000 }] }
@@ -138,5 +138,63 @@ describe('鱿鱼游戏规则', () => {
     expect(isSquidPayer(pending, { squidDebt: 0 })).toBe(false)
     expect(isSquidPayer(waitingTable, { squidDebt: 60 })).toBe(false)
     expect(isSquidPayer(pending, null)).toBe(false)
+  })
+})
+
+describe('罚金赔付后的补码提示', () => {
+  // 实测场景（本地后端跑出来）：buyIn=1000、罚金=500 筹码
+  // 手 1 结束时桌上 990，手 2 被罚 500 → 桌上 470（minBuyIn=1000）
+  // 罚之前是 970，加上罚金 500 才够最低带入，属于「罚金扣的」，不该弹补码
+  const penaltyTable = {
+    phase: 'SHOWDOWN', minBuyIn: 1000, maxBuyIn: 4000, defaultBuyIn: 2000, bigBlind: 20,
+    squid: {
+      markerTotal: 2, markersRemaining: 0, round: 1, penaltyPending: false,
+      players: [
+        { id: 'me', nickname: 'Alice', markers: 0, squidId: true, debt: 0, penaltyPaid: 500 },
+        { id: 'bob', nickname: 'Bob', markers: 1, squidId: false, debt: 0, penaltyPaid: 0 }
+      ],
+      settlements: [
+        { squidId: 'me', squid: 'Alice', recipientId: 'bob', recipient: 'Bob',
+          amount: 500, paid: 500, outstanding: 0, settled: true }
+      ]
+    }
+  }
+
+  it('sums the penalty a player paid this round', () => {
+    expect(squidPenaltyPaidBy(penaltyTable, { id: 'me' })).toBe(500)
+    expect(squidPenaltyPaidBy(penaltyTable, { id: 'bob' })).toBe(0)
+    expect(squidPenaltyPaidBy(penaltyTable, null)).toBe(0)
+    expect(squidPenaltyPaidBy({}, { id: 'me' })).toBe(0)
+  })
+
+  it('keeps the penalty snapshot after the settlement list is cleared', () => {
+    // 下一局开始时赔付明细会被服务端清空，但「刚被罚过」这个事实要留着，
+    // 否则下一局一开又会误判成缺钱、弹出补码菜单
+    const nextHand = { ...penaltyTable, squid: { ...penaltyTable.squid, round: 2, settlements: [] } }
+    expect(squidPenaltyPaidBy(nextHand, { id: 'me' })).toBe(500)
+    expect(shouldAutoOpenTopUp(nextHand, { id: 'me', chips: 470, reserveChips: 9000 })).toBe(false)
+  })
+
+  it('does not ask for a top-up when the stack only dropped because of the penalty', () => {
+    // 桌上 470，被罚 500 → 罚之前是 970，本来就够开局，不是缺钱
+    expect(shouldAutoOpenTopUp(penaltyTable, { id: 'me', chips: 470, reserveChips: 9000 })).toBe(false)
+    // 被罚 500，罚完还剩 500（罚之前 1000）→ 同样不算缺钱
+    expect(shouldAutoOpenTopUp(penaltyTable, { id: 'me', chips: 500, reserveChips: 9000 })).toBe(false)
+  })
+
+  it('still asks for a top-up when the stack is short for other reasons', () => {
+    // 桌上 470 但一笔罚金都没付过 → 真的是输光了
+    expect(shouldAutoOpenTopUp(penaltyTable, { id: 'bob', chips: 470, reserveChips: 9000 })).toBe(true)
+    // 罚金还挂着欠款 → 得先补码才赔得掉，必须弹
+    expect(shouldAutoOpenTopUp(penaltyTable,
+      { id: 'me', chips: 470, reserveChips: 9000, squidDebt: 200 })).toBe(true)
+    // 真的输光了（筹码 0）→ 不管有没有罚金都要弹
+    expect(shouldAutoOpenTopUp(penaltyTable,
+      { id: 'me', chips: 0, reserveChips: 9000, squidDebt: 0 })).toBe(true)
+  })
+
+  it('does not open the top-up menu when the stack is healthy', () => {
+    expect(shouldAutoOpenTopUp(penaltyTable, { id: 'me', chips: 2000, reserveChips: 9000 })).toBe(false)
+    expect(shouldAutoOpenTopUp(penaltyTable, null)).toBe(false)
   })
 })

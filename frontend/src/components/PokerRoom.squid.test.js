@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h } from 'vue'
+import { createApp, h, reactive } from 'vue'
 import PokerRoom from './PokerRoom.vue'
 
 function seat(id, nickname, chips, extra = {}) {
@@ -13,8 +13,8 @@ function squidState(extra = {}) {
   return { enabled: true, markerTotal: 4, markersRemaining: 2, penaltyBigBlinds: 3,
     penaltyAmount: 60, round: 1, penaltyPending: false, penaltyPrompt: null,
     players: [
-      { id: 'me', nickname: 'Alice', markers: 2, squidId: false, debt: 0 },
-      { id: 'bob', nickname: 'Bob', markers: 0, squidId: false, debt: 0 }
+      { id: 'me', nickname: 'Alice', markers: 2, squidId: false, debt: 0, penaltyPaid: 0 },
+      { id: 'bob', nickname: 'Bob', markers: 0, squidId: false, debt: 0, penaltyPaid: 0 }
     ], settlements: [], ...extra }
 }
 
@@ -146,8 +146,8 @@ describe('鱿鱼游戏', () => {
     mountRoom(tableWith({
       squid: squidState({
         players: [
-          { id: 'me', nickname: 'Alice', markers: 1, squidId: false, debt: 0 },
-          { id: 'bob', nickname: 'Bob', markers: 0, squidId: true, debt: 0 }
+          { id: 'me', nickname: 'Alice', markers: 1, squidId: false, debt: 0, penaltyPaid: 0 },
+          { id: 'bob', nickname: 'Bob', markers: 0, squidId: true, debt: 0, penaltyPaid: 60 }
         ]
       }),
       players: [seat('me', 'Alice', 2600, { squidMarkers: 1, seat: 0 }),
@@ -177,8 +177,8 @@ describe('鱿鱼游戏', () => {
         penaltyPending: true,
         penaltyPrompt: 'Bob 需要赔付（每人 60 筹码）才能开始下一局',
         players: [
-          { id: 'me', nickname: 'Alice', markers: 2, squidId: false, debt: 0 },
-          { id: 'bob', nickname: 'Bob', markers: 0, squidId: true, debt: 60 }
+          { id: 'me', nickname: 'Alice', markers: 2, squidId: false, debt: 0, penaltyPaid: 0 },
+          { id: 'bob', nickname: 'Bob', markers: 0, squidId: true, debt: 60, penaltyPaid: 60 }
         ]
       }),
       players: [seat('me', 'Alice', 2600, { squidDebt: 0 }), seat('bob', 'Bob', 1400, { squidDebt: 60 })]
@@ -217,7 +217,7 @@ describe('鱿鱼游戏', () => {
       })
     }))
     await nextTick()
-    await expandDetail()
+    // 有赔付明细说明这一轮已经结算完，明细会自动展开，不用手动点
     const box = root.querySelector('.squid-settlement-box')
     expect(box).not.toBeNull()
     expect(box.textContent).toContain('本轮赔付结算')
@@ -254,5 +254,134 @@ describe('鱿鱼游戏', () => {
     mountRoom(tableWith())
     await nextTick()
     expect(root.querySelector('.squid-settlement-box')).toBeNull()
+  })
+})
+
+describe('鱿鱼一轮结算完的自动展开', () => {
+  const settledSquid = () => squidState({
+    markerTotal: 2, markersRemaining: 0, round: 1,
+    players: [
+      { id: 'me', nickname: 'Alice', markers: 0, squidId: true, debt: 0, penaltyPaid: 60 },
+      { id: 'bob', nickname: 'Bob', markers: 1, squidId: false, debt: 0, penaltyPaid: 0 }
+    ],
+    settlements: [
+      { squidId: 'me', squid: 'Alice', recipientId: 'bob', recipient: 'Bob',
+        amount: 60, paid: 60, outstanding: 0, settled: true }
+    ]
+  })
+
+  it('expands the detail once the round penalty is settled', async () => {
+    // 本轮罚金结算完 → 鱿鱼菜单必须自动展开，
+    // 否则玩家看不到「谁被判鱿鱼 / 谁赔了谁多少」
+    mountRoom(tableWith({ squid: settledSquid() }))
+    await nextTick()
+    const detail = root.querySelector('.squid-detail')
+    expect(detail).not.toBeNull()
+    expect(detail.textContent).toContain('本轮赔付结算')
+    expect(detail.textContent).toContain('Alice')
+    expect(detail.textContent).toContain('Bob')
+    expect(root.querySelector('.squid-settlement-row')).not.toBeNull()
+  })
+
+  it('keeps the detail expanded instead of flashing once', async () => {
+    mountRoom(tableWith({ squid: settledSquid() }))
+    await nextTick()
+    // 自动展开后不能自己收回去：这里连等几拍再确认
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(root.querySelector('.squid-detail')).not.toBeNull()
+    expect(root.querySelector('.squid-bar').getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('lets the player collapse the auto-expanded detail', async () => {
+    mountRoom(tableWith({ squid: settledSquid() }))
+    await nextTick()
+    expect(root.querySelector('.squid-detail')).not.toBeNull()
+    await expandDetail()
+    expect(root.querySelector('.squid-detail')).toBeNull()
+    // 收起后下一次状态推送也不该再自动弹回来
+    await new Promise(resolve => setTimeout(resolve, 60))
+    expect(root.querySelector('.squid-detail')).toBeNull()
+  })
+
+  it('expands again when the next round settles', async () => {
+    mountRoom(tableWith({ squid: settledSquid() }))
+    await nextTick()
+    await expandDetail()
+    expect(root.querySelector('.squid-detail')).toBeNull()
+
+    // 下一轮又结算了 → 重新自动展开
+    const nextRound = settledSquid()
+    nextRound.round = 2
+    app.unmount(); root.remove()
+    mountRoom(tableWith({ squid: nextRound }))
+    await nextTick()
+    expect(root.querySelector('.squid-detail')).not.toBeNull()
+  })
+
+  it('keeps the detail collapsed while the round is still running', async () => {
+    mountRoom(tableWith({ squid: squidState({ markerTotal: 4, markersRemaining: 2, round: 1 }) }))
+    await nextTick()
+    // 还没结算完（没有赔付明细）→ 不自动展开
+    expect(root.querySelector('.squid-detail')).toBeNull()
+  })
+})
+
+describe('罚金赔付后不自动弹补码菜单', () => {
+  // 补码菜单是靠 watch 筹码变化自动弹的，所以这里要模拟「手打完、筹码掉了」的过程：
+  // 先以正常筹码挂桌，再把筹码改成罚金后的样子。
+  function penaltyScene(chipsAfterPenalty) {
+    return reactive(tableWith({
+      phase: 'SHOWDOWN',
+      players: [seat('me', 'Alice', 1500, { reserveChips: 9000 }),
+        seat('bob', 'Bob', 1500, { reserveChips: 9000 })],
+      squid: squidState({
+        markerTotal: 2, markersRemaining: 0, round: 1,
+        players: [
+          { id: 'me', nickname: 'Alice', markers: 0, squidId: true, debt: 0, penaltyPaid: 500 },
+          { id: 'bob', nickname: 'Bob', markers: 1, squidId: false, debt: 0, penaltyPaid: 0 }
+        ],
+        settlements: [
+          { squidId: 'me', squid: 'Alice', recipientId: 'bob', recipient: 'Bob',
+            amount: 500, paid: 500, outstanding: 0, settled: true }
+        ]
+      })
+    }))
+  }
+
+  it('does not open the top-up menu when the stack only dropped because of the penalty', async () => {
+    const table = penaltyScene()
+    mountRoom(table)
+    await nextTick()
+    // 罚金赔付把桌上筹码打到最低带入以下：这是应缴的罚款，不是「没钱继续」
+    table.players[0].chips = 470
+    await nextTick()
+    await nextTick()
+    expect(root.querySelector('.bankroll-actions')).toBeNull()
+    expect(root.querySelector('.chip-manager-toggle').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('still opens the top-up menu when the stack really ran out', async () => {
+    const table = penaltyScene()
+    mountRoom(table)
+    await nextTick()
+    // 真的输光了 → 不补码就上不了下一局，必须弹
+    table.players[0].chips = 0
+    await nextTick()
+    await nextTick()
+    expect(root.querySelector('.bankroll-actions')).not.toBeNull()
+  })
+
+  it('still opens the top-up menu when the penalty is still owed', async () => {
+    const table = penaltyScene()
+    mountRoom(table)
+    await nextTick()
+    // 罚金还挂着欠款 → 玩家得先补码才赔得掉，这一笔必须弹
+    table.players[0].chips = 470
+    table.players[0].squidDebt = 200
+    table.squid.penaltyPending = true
+    table.squid.penaltyPrompt = 'Alice 需要赔付（每人 500 筹码）才能开始下一局'
+    await nextTick()
+    await nextTick()
+    expect(root.querySelector('.bankroll-actions')).not.toBeNull()
   })
 })

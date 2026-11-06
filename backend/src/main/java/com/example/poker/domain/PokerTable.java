@@ -73,6 +73,14 @@ public final class PokerTable {
     private final Set<UUID> squidIds = new HashSet<>();
     /** 未结清的赔付义务（鱿鱼 -> 收赔付的人）。 */
     private final List<SquidObligation> squidObligations = new ArrayList<>();
+    /**
+     * 最近一轮罚金结算时，每个人被扣了多少筹码（玩家 id -> 本轮罚金总额）。
+     *
+     * 赔付明细 squidObligations 会在下一局开始时清空，但前端还需要判断
+     * 「桌上筹码低是因为被罚了」—— 否则玩家刚被罚完、下一局一开又会被弹补码菜单。
+     * 所以这里单独留一份快照，跨轮次保留。
+     */
+    private final Map<UUID, Integer> squidPenaltyPaid = new HashMap<>();
     /** 是否还有未结清的鱿鱼赔付（未结清就不能开下一局）。 */
     private boolean squidPenaltyPending;
     /** 本手攒下来的鱿鱼提示，等结果消息定稿后再拼上去。 */
@@ -385,6 +393,8 @@ public final class PokerTable {
     public int squidDebt(UUID playerId) { return squidDebt.getOrDefault(playerId, 0); }
     /** 本轮这个人是不是被判成了鱿鱼。 */
     public boolean squidId(UUID playerId) { return squidIds.contains(playerId); }
+    /** 最近一轮这个人被罚了多少罚金（筹码）。跨轮次保留，直到下一轮罚金结算。 */
+    public int squidPenaltyPaid(UUID playerId) { return squidPenaltyPaid.getOrDefault(playerId, 0); }
     /** 本轮的赔付明细（含已结清的），用于结果画面的结算框。 */
     public List<SquidObligation> squidObligations() { return List.copyOf(squidObligations); }
     /** 是不是牌桌创建人（第一个入座的人）。公开桌的「开始下一局」只给 TA 显示。 */
@@ -736,6 +746,10 @@ public final class PokerTable {
         squidIds.addAll(squids.stream().map(PlayerState::id).toList());
         squidDebt.clear();
         squidObligations.clear();
+        // 新一轮赔付判定开始：上一轮的罚金快照作废，
+        // 但它要一直留到这一刻为止 —— 下一局里前端还得靠它判断
+        // 「筹码低是因为刚被罚」而不是「玩家缺钱」。
+        squidPenaltyPaid.clear();
 
         if (squids.isEmpty() || recipients.isEmpty()) {
             // 没有鱿鱼（或没有人可收赔付）：本轮直接结束，等下一局开始时重置
@@ -761,6 +775,9 @@ public final class PokerTable {
         squidDebt.clear();
         for (SquidObligation obligation : squidObligations) {
             if (obligation.amount() <= 0) continue;
+            // 记录本轮罚金总额：前端要靠它区分「筹码低是因为被罚」还是「真的缺钱」，
+            // 赔付明细下一局就清空了，这份快照要跨轮次留着。
+            squidPenaltyPaid.merge(obligation.squidId(), obligation.total(), Integer::sum);
             PlayerState squid = players.stream().filter(p -> p.id().equals(obligation.squidId()))
                     .findFirst().orElse(null);
             PlayerState recipient = players.stream().filter(p -> p.id().equals(obligation.recipientId()))

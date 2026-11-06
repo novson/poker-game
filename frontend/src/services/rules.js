@@ -70,6 +70,52 @@ export function playersNeedingTopUp(table) {
 }
 
 /**
+ * 当前玩家最近一轮被罚了多少罚金（筹码）。
+ *
+ * 罚金会直接把桌上筹码打下去，可能低于 minBuyIn。但这是规则内应缴的罚款，
+ * 不是「输光了没钱继续」，所以不该因此弹出补码菜单 —— 否则玩家刚被罚完
+ * 就被要求补码，既突兀又会打断「看赔付结算」的结果画面。
+ *
+ * 数据来自服务端下发的 squid.players[].penaltyPaid：赔付明细会在下一局开始时
+ * 清空，但「刚被罚过」这个事实要跨轮次留着，否则下一局一开又会被弹补码菜单。
+ */
+export function squidPenaltyPaidBy(table, player) {
+  const squidId = player?.id
+  if (!squidId) return 0
+  const entry = (table?.squid?.players || []).find(item => item?.id === squidId)
+  if (entry) return Number(entry.penaltyPaid) || 0
+  // 兼容旧结构：没有 penaltyPaid 时退回赔付明细里算
+  return (table?.squid?.settlements || [])
+    .filter(item => item.squidId === squidId)
+    .reduce((sum, item) => sum + (Number(item.amount) || 0), 0)
+}
+
+/**
+ * 桌上筹码低于最低带入时，是否应该自动弹出补码菜单。
+ *
+ * 规则：
+ * - 筹码不低于 minBuyIn → 不弹（筹码还够）
+ * - 筹码为 0（真的输光了）→ 要弹，不补码就上不了下一局
+ * - 罚金还挂着欠款（squidDebt > 0）→ 要弹：得先补码才赔得掉那一笔
+ * - 筹码低是因为刚被罚了罚金 → 不弹：那是规则内应缴的罚款，不是「没钱继续」，
+ *   弹出来既突兀又会盖住刚结算完的赔付结果画面
+ * - 其它情况（打输了、筹码不够下一局）→ 弹
+ */
+export function shouldAutoOpenTopUp(table, player) {
+  if (!player) return false
+  const chips = Number(player.chips) || 0
+  const minimum = Number(table?.minBuyIn) || 0
+  if (chips >= minimum) return false
+  // 真的输光了：不补码就上不了下一局
+  if (chips <= 0) return true
+  // 罚金还欠着：不弹不行，得先补码才赔得掉
+  if (Number(player.squidDebt) > 0) return true
+  // 筹码低是被罚金扣的：那不是缺钱
+  if (squidPenaltyPaidBy(table, player) > 0) return false
+  return true
+}
+
+/**
  * 开始下一局前的确认文案：有人还没补码时返回提示，否则返回 null（直接开始）。
  * 确定 = 立即开始；取消 = 留时间给 TA 补码。
  */

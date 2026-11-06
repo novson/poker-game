@@ -4,8 +4,8 @@ import PlayingCard from './PlayingCard.vue'
 import { createPokerAudio, readAudioPreferences, saveAudioPreferences, VOICE_EMOTES } from '../services/audio'
 import { canTopUpAmount, suggestedTopUp } from '../services/chips'
 import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart as getCanStart,
-  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, squidPenaltyPrompt,
-  squidPenaltyPending, topUpWaitPrompt, validRaise } from '../services/rules'
+  minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, shouldAutoOpenTopUp, showdownHoldRemaining,
+  squidPenaltyPrompt, squidPenaltyPending, topUpWaitPrompt, validRaise } from '../services/rules'
 import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
 import { remainingUntil } from '../services/clock'
 import { seatsFromViewer } from '../services/tableView'
@@ -130,9 +130,43 @@ const squidSettlementTotal = computed(() =>
 // 鱿鱼面板默认收起成一条状态条：牌桌上下留给公共牌和手牌的空间很紧张，
 // 平时常驻一整块面板会把牌桌压扁。明细按需展开。
 const squidExpanded = ref(false)
+// 本轮结算完时自动展开明细：这一轮的信息（谁拿了标记、谁被判鱿鱼、
+// 谁赔了谁多少）只有这一刻最该被看到。
+//
+// 这里记的是「已经自动展开过的轮次号」，不是「刚刚结算」这种瞬时状态。
+// 用瞬时状态的话，标记和复位发生在同一帧，展开出来只会闪一下又收回去。
+// 服务端的赔付明细会保留到下一局开始才清空（resetSquidRound），
+// 所以「轮次号 + 明细条数」足够稳定地认出这一轮结算过。
+const squidRound = computed(() => Number(props.table?.squid?.round) || 0)
+// 用户在这一轮手动收起过：之后别再自动弹回来打扰 TA
+const squidCollapsedRound = ref(0)
+const squidAutoRound = ref(0)
+watch(() => `${props.table?.squid?.round}:${squidSettlements.value.length}`,
+  () => {
+    const round = Number(props.table?.squid?.round) || 0
+    if (round > 0 && squidSettlements.value.length > 0 && squidAutoRound.value !== round) {
+      squidAutoRound.value = round
+    }
+  }, { immediate: true })
+// 自动展开的条件：本轮结算过、明细还在、用户没手动收起过
+const squidAutoOpen = computed(() => squidAutoRound.value > 0
+  && squidAutoRound.value === squidRound.value
+  && squidAutoRound.value !== squidCollapsedRound.value
+  && squidSettlements.value.length > 0)
 // 有待结清赔付时强制展开：警告和「结算赔付」按钮是必须看到的信息，
 // 不能被折叠藏起来（赔付没结清本来就不允许开下一局）。
-const squidDetailOpen = computed(() => squidExpanded.value || Boolean(squidPendingText.value))
+const squidDetailOpen = computed(() => squidExpanded.value
+  || Boolean(squidPendingText.value) || squidAutoOpen.value)
+// 状态条整条可点：展开时点一下收起（自动展开的那次也要记住收起意愿），
+// 收起时点一下展开。
+function toggleSquidDetail() {
+  if (squidDetailOpen.value) {
+    squidExpanded.value = false
+    if (squidAutoOpen.value) squidCollapsedRound.value = squidAutoRound.value
+  } else {
+    squidExpanded.value = true
+  }
+}
 // 标记进度用一条进度条表示，而不是 N 个槽位：标记数最多能配到 60 个，
 // 槽位画法在多标记时会换行，把面板撑高好几行。
 const squidProgressPercent = computed(() => {
@@ -208,6 +242,8 @@ watch([
   () => props.table.defaultBuyIn
 ], () => {
   if (!betweenHands.value || canTopUp.value) return
+  // 罚金赔付导致的低筹码不算「缺钱」，别把建议补码金额刷成一大笔覆盖用户输入
+  if (!shouldAutoOpenTopUp(props.table, me.value)) return
   const suggestion = suggestedTopUp(props.table, me.value)
   if (suggestion > 0) chipAmount.value = suggestion
 }, { immediate: true })
@@ -254,7 +290,9 @@ watch(() => actionClock.value.seconds, (seconds, previous) => {
 })
 watch([betweenHands, () => me.value?.chips], ([between, chips]) => {
   if (!between) chipManagerOpen.value = false
-  else if ((chips || 0) < props.table.minBuyIn) chipManagerOpen.value = true
+  // 罚金赔付把筹码打到最低带入以下时不要自动弹补码菜单：
+  // 那是应缴的罚款，不是「没钱继续」，弹出来既突兀又会打断赔付结算画面。
+  else if (shouldAutoOpenTopUp(props.table, me.value)) chipManagerOpen.value = true
 })
 watch(settlement, value => { if (value) settlementDismissed.value = false })
 watch(() => props.emoteEvent, event => {
@@ -538,9 +576,9 @@ onBeforeUnmount(() => {
       </label>
     </section>
 
-    <section v-if="table.squid" class="squid-panel" :class="{ expanded: squidExpanded }" aria-label="鱿鱼游戏">
-      <button class="squid-bar" type="button" :aria-expanded="squidExpanded"
-        @click="squidExpanded = !squidExpanded">
+    <section v-if="table.squid" class="squid-panel" :class="{ expanded: squidDetailOpen }" aria-label="鱿鱼游戏">
+      <button class="squid-bar" type="button" :aria-expanded="squidDetailOpen"
+        @click="toggleSquidDetail">
         <span class="squid-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><use href="#squid-glyph" /></svg></span>
         <span class="squid-bar-title">
           <strong>鱿鱼游戏</strong>
@@ -553,7 +591,7 @@ onBeforeUnmount(() => {
         </span>
         <span class="squid-bar-stat"><small>剩余标记</small><strong>{{ table.squid.markersRemaining }} <i>/ {{ table.squid.markerTotal }}</i></strong></span>
         <span class="squid-bar-stat"><small>赔付</small><strong>{{ table.squid.penaltyAmount }} <i>筹码</i></strong></span>
-        <span v-if="!squidPendingText" class="squid-bar-toggle" aria-hidden="true">{{ squidExpanded ? '收起' : '明细' }}</span>
+        <span v-if="!squidPendingText" class="squid-bar-toggle" aria-hidden="true">{{ squidDetailOpen ? '收起' : '明细' }}</span>
       </button>
 
       <div v-if="squidDetailOpen" class="squid-detail">
