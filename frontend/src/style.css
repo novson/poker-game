@@ -223,7 +223,7 @@ label > small { color: var(--ink-4); font-size: 11px; font-weight: 450; line-hei
 .create-advanced-body p { grid-column: 1/-1; margin: 0; color: var(--ink-4); font-size: 10px; }
 .create-advanced-body .squid-toggle { grid-column: 1/-1; margin-top: 12px; display: flex; align-items: center; gap: 8px; color: var(--ink-2); font-size: 12px; }
 .create-advanced-body .squid-toggle input { width: auto; margin: 0; }
-.create-advanced-body .squid-options { grid-column: 1/-1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 10px; background: rgba(255,255,255,.03); border: 1px solid rgba(255,143,176,.24); border-radius: 9px; }
+.create-advanced-body .squid-options { grid-column: 1/-1; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 10px; background: rgba(214,173,88,.05); border: 1px solid rgba(214,173,88,.22); border-radius: 9px; }
 .create-advanced-body .squid-options p { grid-column: 1/-1; }
 .create-submit { min-height: 52px; margin-top: 1px; display: flex; align-items: center; justify-content: space-between; padding-left: 18px; padding-right: 14px; }
 .create-submit b { width: 28px; height: 28px; display: grid; place-items: center; color: #1a271f; background: rgba(255,255,255,.2); border-radius: 50%; }
@@ -411,37 +411,60 @@ input[aria-invalid="true"] { border-color: #b97164; }
 .settlement-transfers strong { margin-left: auto; color: var(--gold-1); font: 720 13px/1 var(--font-numeric); }
 .settlement-empty { margin: 0; color: var(--ink-4); font-size: 10px; }
 .settlement-note { color: var(--ink-4); font-size: 9px; line-height: 1.65; }
-/* 鱿鱼游戏面板：标记进度、每人标记数、待赔付提示 */
-.squid-panel { position: relative; z-index: 40; margin: 0 16px 8px; padding: 10px 13px; display: grid; gap: 8px; color: var(--ink-2); background: linear-gradient(140deg,rgba(38,12,28,.96),rgba(14,8,14,.96)); border: 1px solid rgba(255,143,176,.32); border-radius: 12px; box-shadow: 0 10px 26px rgba(0,0,0,.34); }
-.squid-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 11px; }
-.squid-title { color: #ffd9e6; font: 800 12px/1 var(--font-ui); letter-spacing:.04em; }
-.squid-pool strong { color: var(--gold-1); font: 800 13px/1 var(--font-numeric); }
-.squid-penalty-rule { color: var(--ink-4); font-size: 9px; }
+/* 鱿鱼游戏面板：默认收成一条状态条，明细按需展开
+   牌桌上下留给公共牌和手牌的空间很紧张，面板常驻一整块会把牌桌压扁，
+   所以平时只留一行 40px 左右的概览，点「明细」才展开。
+   配色沿用牌桌主色（深绿 + 金色），与结算面板、策略面板保持同一套设计语言 */
+.squid-panel { position: relative; z-index: 40; margin: 0 auto 6px; padding: 0; width: min(1200px,calc(100% - 20px)); display: grid; gap: 0; color: var(--ink-2); background: linear-gradient(145deg,rgba(10,42,34,.96),rgba(4,24,20,.96)); border: 1px solid rgba(214,173,88,.26); border-radius: var(--radius-md); box-shadow: var(--shadow-md); overflow: hidden; }
+/* 单行状态条：整条可点开合 */
+.squid-bar { width: 100%; min-height: 38px; padding: 5px 12px; display: flex; align-items: center; gap: 10px; color: var(--ink-2); background: transparent; border: 0; text-align: left; font-family: inherit; cursor: pointer; }
+.squid-bar:hover .squid-bar-toggle { color: var(--gold-1); border-color: rgba(214,173,88,.45); }
+.squid-bar-title { display: grid; gap: 1px; flex: none; }
+.squid-bar-title strong { color: var(--ink-1); font-size: 13px; font-weight: 720; line-height: 1.15; }
+.squid-bar-title small { color: var(--ink-3); font-size: 9px; white-space: nowrap; }
+/* 标记进度改用单条进度条：标记最多能配到 60 个，槽位画法会换行撑高面板 */
+.squid-bar-progress { flex: 1 1 90px; min-width: 60px; display: flex; align-items: center; gap: 7px; }
+.squid-bar-progress > i { flex: 1 1 auto; height: 5px; min-width: 40px; overflow: hidden; background: rgba(4,20,17,.85); border: 1px solid rgba(214,173,88,.3); border-radius: 3px; }
+.squid-bar-progress > i > b { display: block; height: 100%; background: linear-gradient(135deg,var(--gold-1),var(--gold-3)); border-radius: 2px; transition: width .3s ease; }
+.squid-bar-progress > small { flex: none; color: var(--ink-3); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.squid-bar-stat { flex: none; display: grid; gap: 1px; justify-items: end; }
+.squid-bar-stat small { color: var(--ink-4); font-size: 8px; letter-spacing: .04em; }
+.squid-bar-stat strong { color: var(--gold-1); font: 720 13px/1 var(--font-numeric); font-variant-numeric: tabular-nums; }
+.squid-bar-stat strong i { color: var(--ink-4); font: 500 9px/1 var(--font-ui); font-style: normal; margin-left: 1px; }
+.squid-bar-toggle { flex: none; padding: 3px 8px; color: var(--ink-3); background: rgba(3,20,16,.6); border: 1px solid var(--line-soft); border-radius: 5px; font-size: 9px; white-space: nowrap; }
+.squid-detail { padding: 9px 12px 11px; display: grid; gap: 8px; border-top: 1px solid var(--line-soft); }
+/* 章鱼图标用内联 SVG，不用 emoji：emoji 的粉紫在深绿金里会跳色，
+   而且不同系统字形不一致 */
+.svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+.squid-glyph { width: 13px; height: 13px; vertical-align: -2px; }
+.squid-mark { width: 26px; height: 26px; flex: none; display: grid; place-items: center; color: var(--gold-1); background: rgba(214,173,88,.1); border: 1px solid rgba(214,173,88,.28); border-radius: 8px; }
+.squid-mark svg { width: 14px; height: 14px; }
 .squid-markers { display: flex; flex-wrap: wrap; gap: 6px; }
-.squid-chip { padding: 4px 8px; display: grid; gap: 2px; background: rgba(255,255,255,.04); border: 1px solid var(--line-soft); border-radius: 8px; }
-.squid-chip strong { color: var(--ink-1); font-size: 10px; }
-.squid-chip small { color: var(--ink-4); font-size: 9px; }
-.squid-chip.marked { border-color: rgba(255,143,176,.5); }
-.squid-chip.marked small { color: #ffc0d5; }
-.squid-chip.squid { border-color: rgba(226,87,60,.6); background: rgba(226,87,60,.12); }
-.squid-chip.squid small { color: #ffb19f; }
-.squid-warning { margin: 0; padding: 7px 10px; color: #ffd0c0; background: rgba(226,87,60,.16); border: 1px solid rgba(226,87,60,.42); border-radius: 8px; font-size: 10px; line-height: 1.5; }
+.squid-chip { padding: 4px 8px; display: grid; gap: 1px; background: rgba(255,255,255,.035); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.squid-chip strong { color: var(--ink-1); font-size: 11px; font-weight: 650; }
+.squid-chip small { color: var(--ink-4); font-size: 10px; display: inline-flex; align-items: center; gap: 3px; }
+.squid-chip.marked { border-color: rgba(214,173,88,.45); background: rgba(214,173,88,.09); }
+.squid-chip.marked small { color: var(--gold-1); }
+.squid-chip.squid { border-color: rgba(225,120,102,.45); background: rgba(116,45,37,.24); }
+.squid-chip.squid strong { color: #efa194; }
+.squid-chip.squid small, .squid-chip-debt { color: #efa194 !important; }
+.squid-warning { margin: 0; padding: 6px 10px; color: #efa194; background: rgba(116,45,37,.2); border: 1px solid rgba(225,120,102,.4); border-radius: var(--radius-sm); font-size: 10px; line-height: 1.5; }
 .squid-settle { justify-self: start; padding: 7px 14px; font-size: 11px; }
-.squid-settlement-box { padding: 9px 11px; background: rgba(0,0,0,.28); border: 1px solid var(--line-soft); border-radius: 9px; display: grid; gap: 6px; }
+.squid-settlement-box { padding: 8px 10px; background: rgba(2,18,15,.5); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); display: grid; gap: 6px; }
 .squid-settlement-box > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
-.squid-settlement-title { color: #ffd9e6; font: 800 11px/1 var(--font-ui); letter-spacing:.03em; }
-.squid-settlement-total { color: var(--gold-1); font: 800 11px/1 var(--font-numeric); }
+.squid-settlement-title { color: var(--ink-1); font-size: 11px; font-weight: 650; }
+.squid-settlement-total { color: var(--gold-1); font: 720 11px/1 var(--font-numeric); font-variant-numeric: tabular-nums; }
 .squid-settlement-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
-.squid-settlement-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 12px; padding: 5px 8px; background: rgba(255,255,255,.035); border: 1px solid var(--line-soft); border-radius: 7px; font-size: 10px; }
-.squid-settlement-row.pending { background: rgba(226,87,60,.1); border-color: rgba(226,87,60,.42); }
-.squid-settlement-flow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.squid-settlement-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 12px; padding: 5px 8px; background: rgba(255,255,255,.035); border: 1px solid var(--line-soft); border-radius: 6px; font-size: 11px; }
+.squid-settlement-row.pending { background: rgba(116,45,37,.18); border-color: rgba(225,120,102,.42); }
+.squid-settlement-flow { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .squid-settlement-flow strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.squid-payer { color: #ffb19f; }
-.squid-recipient { color: #ffc0d5; }
+.squid-payer { color: #efa194; }
+.squid-recipient { color: var(--gold-1); }
 .squid-arrow { color: var(--ink-4); }
-.squid-settlement-amount { color: var(--gold-1); font: 800 11px/1 var(--font-numeric); white-space: nowrap; }
-.squid-settlement-state { color: var(--ink-3); font-size: 9px; white-space: nowrap; }
-.squid-settlement-state.pending { color: #ffd0c0; }
+.squid-settlement-amount { color: var(--gold-1); font: 720 11px/1 var(--font-numeric); white-space: nowrap; }
+.squid-settlement-state { color: var(--ink-3); font-size: 10px; white-space: nowrap; }
+.squid-settlement-state.pending { color: #efa194; }
 .sound-panel { position: fixed; z-index: 75; top: 64px; right: 20px; width: min(330px,calc(100vw - 24px)); padding: 15px; color: var(--ink-2); background: rgba(5,27,22,.97); border: 1px solid rgba(214,173,88,.32); border-radius: var(--radius-md); box-shadow: var(--shadow-lg); backdrop-filter: blur(18px); }
 .sound-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; }
 .sound-panel > header strong { color: var(--ink-1); font-size: 17px; }
@@ -520,8 +543,9 @@ input[aria-invalid="true"] { border-color: #b97164; }
 /* 挂在名牌右侧外面：压在中间会挡住昵称和筹码，放在上方又会压住底牌的花色 */
 .winner-badge { position:absolute; z-index:5; right:-15px; top:50%; width:24px; height:24px; display:grid; place-items:center; transform:translateY(-50%); color:#2b2110; background:linear-gradient(135deg,#f7dda0,#c9973b); border:1px solid #fff0b5; border-radius:50%; box-shadow:0 4px 12px rgba(0,0,0,.45),0 0 14px rgba(242,197,91,.4); font-size:12px; line-height:1; }
 /* 鱿鱼标记：显示在名牌上方，不与胜者徽标、底牌抢位置 */
-.squid-marker-badge { position:absolute; z-index:5; left:-8px; top:-9px; padding:2px 5px; color:#ffd9e6; background:#5c1f38; border:1px solid #ff8fb0; border-radius:4px; font:800 8px/1.2 var(--font-ui); }
-.squid-id-badge { position:absolute; z-index:5; left:-10px; top:-26px; padding:2px 5px; color:#2b0f16; background:linear-gradient(135deg,#ff9d85,#e2573c); border:1px solid #ffd0c0; border-radius:4px; font:800 8px/1.2 var(--font-ui); }
+.squid-marker-badge { position:absolute; z-index:5; left:-8px; top:-9px; padding:2px 5px; display:inline-flex; align-items:center; gap:2px; color:#2b2110; background:linear-gradient(135deg,#f0d792,#c9973b); border:1px solid #fff0b5; border-radius:4px; font:800 8px/1.2 var(--font-ui); }
+.squid-marker-badge svg { width: 11px; height: 11px; }
+.squid-id-badge { position:absolute; z-index:5; left:-10px; top:-26px; padding:2px 5px; color:#fff1ed; background:rgba(111,42,34,.96); border:1px solid rgba(225,120,102,.75); border-radius:4px; font:800 8px/1.2 var(--font-ui); }
 .action-clock { position:absolute; z-index:6; right:-20px; top:50%; width:38px; height:38px; display:grid; place-items:center; transform:translateY(-50%); color:var(--gold-1); background:rgba(3,20,17,.94); border-radius:50%; box-shadow:0 4px 14px rgba(0,0,0,.55); font-family:var(--font-numeric); }
 .action-clock svg { position:absolute; inset:0; width:100%; height:100%; transform:rotate(-90deg); overflow:visible; }
 .action-clock circle { fill:none; stroke-width:3; }
@@ -947,6 +971,14 @@ input[aria-invalid="true"] { border-color: #b97164; }
   .room-shell:has(.connection-banner) .voice-emote-dock,.room-shell:has(.connection-banner) .strategy-panel { top:126px; }
   .leave-panel { top:62px; }
   .room-shell ~ .toast { top:68px; bottom:auto; font-size:13px; }
+  /* 鱿鱼状态条在窄屏收得更紧：隐藏次要统计，保留进度和剩余标记 */
+  .squid-panel { width:calc(100% - 12px); margin-bottom:4px; }
+  .squid-bar { padding:4px 9px; gap:7px; }
+  .squid-bar-title small { display:none; }
+  .squid-bar-stat small { display:none; }
+  .squid-bar-stat strong { font-size:12px; }
+  .squid-bar-progress { min-width:40px; }
+  .squid-detail { padding:8px 9px 10px; }
 }
 @media (max-width:360px) {
   .room-shell .turn-glance { grid-template-columns:auto 1fr auto; }

@@ -1,3 +1,5 @@
+import { remainingUntil } from './clock'
+
 export const URGENT_SECONDS = 5
 
 export function boardMotion(index) {
@@ -6,9 +8,13 @@ export function boardMotion(index) {
   return { name: 'river', delay: 100 }
 }
 
+/**
+ * 行动倒计时。deadline 是服务端下发的绝对时间戳，now 是本机时刻
+ * （内部换算到服务端时间空间，所以本机时钟不准时也不会算错）。
+ */
 export function turnClock(deadline, durationSeconds, now = Date.now()) {
   const duration = Math.max(1, Number(durationSeconds) || 1) * 1000
-  const remainingMs = Math.max(0, Number(deadline) - Number(now))
+  const remainingMs = remainingUntil(deadline, now)
   const seconds = Math.min(Math.ceil(duration / 1000), Math.ceil(remainingMs / 1000))
   return {
     remainingMs,

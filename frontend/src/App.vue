@@ -7,6 +7,7 @@ import { clearPokerSession, readPokerSession, savePokerSession } from './service
 import { watchTable } from './services/socket'
 import { createTableRefresh, shouldApplyTable, tableExitMessage } from './services/tableSync'
 import { buyInState, tableAvailability } from './services/lobby'
+import { syncServerClock } from './services/clock'
 
 const tables = ref([])
 const tablesLoading = ref(false)
@@ -406,6 +407,10 @@ function handleTableError(e, background = false) {
 }
 
 function applyTable(latest) {
+  // 先校准服务端时钟：行动倒计时和结果保留窗口都依赖服务端时间戳，
+  // 本机时钟不准时会把整个保留窗口算错（表现为一局结束立刻开下一局）。
+  // 放在版本守卫之前，过期的快照也能用来校准。
+  syncServerClock(latest.serverTime)
   if (!shouldApplyTable(table.value, latest)) return
   if (!latest.players.some(player => player.id === playerId.value)) {
     finishLeaving('已结算离桌，筹码与战绩已保存，可以加入其他牌桌')

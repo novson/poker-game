@@ -7,6 +7,7 @@ import { callAmount as getCallAmount, canAllIn, canAutoStartNextHand, canStart a
   minimumRaiseTo, playersNeedingTopUp, quickRaiseTo, showdownHoldRemaining, squidPenaltyPrompt,
   squidPenaltyPending, topUpWaitPrompt, validRaise } from '../services/rules'
 import { boardMotion, collectBetFlights, turnClock, winningCardState } from '../services/tableEffects'
+import { remainingUntil } from '../services/clock'
 import { seatsFromViewer } from '../services/tableView'
 import { roomLayout } from '../services/roomLayout'
 
@@ -43,6 +44,8 @@ const effectsEnabled = ref(savedAudio.effectsEnabled)
 const audioVolume = ref(savedAudio.volume)
 const musicStatus = ref(savedAudio.musicEnabled ? '点击页面后开始播放' : '')
 const activeEmote = ref(null)
+// actionNow 每 200ms 刷新一次，亮牌窗口一过这里就会自己重新算出来
+// 这里存的是**本机时刻**；服务端时间戳的换算统一交给 services/clock.js
 const actionNow = ref(Date.now())
 const chipFlights = ref([])
 let autoTimer
@@ -74,7 +77,6 @@ const canCashOut = computed(() => {
   return transferAmount.value > 0 && remaining >= 0
     && (remaining === 0 || remaining >= props.table.minBuyIn)
 })
-// actionNow 每 200ms 刷新一次，亮牌窗口一过这里就会自己重新算出来
 const autoNextEligible = computed(() => canAutoStartNextHand(props.table, me.value, actionNow.value))
 // 别人都弃牌获胜时底牌默认不公开，赢家可以自己决定亮出来
 const canShowCards = computed(() => Boolean(props.table.canShowCards))
@@ -96,8 +98,9 @@ const publicAutoDeadline = computed(() => {
   const holdUntil = Number(props.table.showdownHoldUntil) || 0
   return publicShowdown.value && holdUntil > 0 ? holdUntil + 5_000 : 0
 })
+// 剩余秒数走 clock.js 换算，本机时钟不准时也不会算错
 const publicAutoSeconds = computed(() => publicAutoDeadline.value
-  ? Math.max(0, Math.ceil((publicAutoDeadline.value - actionNow.value) / 1000))
+  ? Math.ceil(remainingUntil(publicAutoDeadline.value, actionNow.value) / 1000)
   : 0)
 const publicAutoCancelled = ref(false)
 const autoStartEmitted = ref(false)
@@ -124,6 +127,20 @@ const mySquidDebt = computed(() => me.value?.squidDebt || 0)
 const squidSettlements = computed(() => props.table?.squid?.settlements || [])
 const squidSettlementTotal = computed(() =>
   squidSettlements.value.reduce((sum, item) => sum + (Number(item.amount) || 0), 0))
+// 鱿鱼面板默认收起成一条状态条：牌桌上下留给公共牌和手牌的空间很紧张，
+// 平时常驻一整块面板会把牌桌压扁。明细按需展开。
+const squidExpanded = ref(false)
+// 有待结清赔付时强制展开：警告和「结算赔付」按钮是必须看到的信息，
+// 不能被折叠藏起来（赔付没结清本来就不允许开下一局）。
+const squidDetailOpen = computed(() => squidExpanded.value || Boolean(squidPendingText.value))
+// 标记进度用一条进度条表示，而不是 N 个槽位：标记数最多能配到 60 个，
+// 槽位画法在多标记时会换行，把面板撑高好几行。
+const squidProgressPercent = computed(() => {
+  const total = Number(props.table?.squid?.markerTotal) || 0
+  if (total <= 0) return 0
+  const sent = total - (Number(props.table?.squid?.markersRemaining) || 0)
+  return Math.max(0, Math.min(100, Math.round((sent / total) * 100)))
+})
 // 本局试算：只有创建人能开关，打开后所有人都会收到 settlement
 const canSettle = computed(() => Boolean(props.table.canSettle))
 const settlement = computed(() => props.table.settlement || null)
@@ -406,6 +423,23 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <svg class="svg-defs" aria-hidden="true" focusable="false">
+    <!-- 章鱼标记：不用 emoji，避免系统字形跳色 -->
+    <symbol id="squid-glyph" viewBox="0 0 16 16">
+      <!-- 用 mask 把眼睛挖空，这样图标放在任何底色上都清晰 -->
+      <mask id="squid-glyph-mask">
+        <rect width="16" height="16" fill="#fff" />
+        <circle cx="6.4" cy="4.9" r="1.15" fill="#000" />
+        <circle cx="9.6" cy="4.9" r="1.15" fill="#000" />
+      </mask>
+      <g fill="currentColor" mask="url(#squid-glyph-mask)">
+        <!-- 圆脑袋 -->
+        <ellipse cx="8" cy="5.4" rx="3.9" ry="3.5" />
+        <!-- 四条触手：左右各两条，向下张开 -->
+        <path d="M5.2 7.6c-1.5.6-2.6 1.9-2.7 3.3-.05.75.6 1.05 1.05.6.4-.4.5-1.15.85-1.85.25.55.3 1.35.15 2.05-.2.8.5 1.2 1.05.8.4-.3.5-.95.8-1.6.3.65.4 1.3.8 1.6.55.4 1.25 0 1.05-.8-.15-.7-.1-1.5.15-2.05.35.7.45 1.45.85 1.85.45.45 1.1.15 1.05-.6-.1-1.4-1.2-2.7-2.7-3.3z" />
+      </g>
+    </symbol>
+  </svg>
   <main class="room-shell" :class="{
     'has-turn-controls': myTurn,
     'active-hand': !betweenHands,
@@ -504,42 +538,58 @@ onBeforeUnmount(() => {
       </label>
     </section>
 
-    <section v-if="table.squid" class="squid-panel" aria-label="鱿鱼游戏">
-      <div class="squid-summary">
-        <span class="squid-title"><span aria-hidden="true">🐙</span> 鱿鱼游戏 · 第 {{ table.squid.round }} 轮</span>
-        <span class="squid-pool">剩余标记 <strong>{{ table.squid.markersRemaining }}</strong> / {{ table.squid.markerTotal }}</span>
-        <span class="squid-penalty-rule">罚金 {{ table.squid.penaltyBigBlinds }} BB（每个有标记的人收 {{ table.squid.penaltyAmount }} 筹码）</span>
-      </div>
-      <div class="squid-markers">
-        <span v-for="player in table.squid.players" :key="player.id" class="squid-chip"
-          :class="{ squid: player.squidId, marked: player.markers > 0 }">
-          <strong>{{ player.nickname }}</strong>
-          <small>{{ player.markers > 0 ? `🐙 ×${player.markers}` : '无标记' }}</small>
+    <section v-if="table.squid" class="squid-panel" :class="{ expanded: squidExpanded }" aria-label="鱿鱼游戏">
+      <button class="squid-bar" type="button" :aria-expanded="squidExpanded"
+        @click="squidExpanded = !squidExpanded">
+        <span class="squid-mark" aria-hidden="true"><svg viewBox="0 0 16 16"><use href="#squid-glyph" /></svg></span>
+        <span class="squid-bar-title">
+          <strong>鱿鱼游戏</strong>
+          <small>第 {{ table.squid.round }} 轮 · 罚金 {{ table.squid.penaltyBigBlinds }} BB</small>
         </span>
+        <span class="squid-bar-progress" role="img"
+          :aria-label="`已发出 ${table.squid.markerTotal - table.squid.markersRemaining} 个标记，共 ${table.squid.markerTotal} 个`">
+          <i><b :style="{ width: `${squidProgressPercent}%` }"></b></i>
+          <small>{{ table.squid.markerTotal - table.squid.markersRemaining }}/{{ table.squid.markerTotal }}</small>
+        </span>
+        <span class="squid-bar-stat"><small>剩余标记</small><strong>{{ table.squid.markersRemaining }} <i>/ {{ table.squid.markerTotal }}</i></strong></span>
+        <span class="squid-bar-stat"><small>赔付</small><strong>{{ table.squid.penaltyAmount }} <i>筹码</i></strong></span>
+        <span v-if="!squidPendingText" class="squid-bar-toggle" aria-hidden="true">{{ squidExpanded ? '收起' : '明细' }}</span>
+      </button>
+
+      <div v-if="squidDetailOpen" class="squid-detail">
+        <div class="squid-markers">
+          <span v-for="player in table.squid.players" :key="player.id" class="squid-chip"
+            :class="{ squid: player.squidId, marked: player.markers > 0 }">
+            <strong>{{ player.nickname }}</strong>
+            <small v-if="player.markers > 0"><svg class="squid-glyph" viewBox="0 0 16 16" aria-hidden="true"><use href="#squid-glyph" /></svg> ×{{ player.markers }}</small>
+            <small v-else-if="player.squidId" class="squid-chip-debt">鱿鱼<template v-if="player.debt > 0"> · 欠 {{ player.debt }}</template></small>
+            <small v-else>无标记</small>
+          </span>
+        </div>
+        <p v-if="squidPendingText" class="squid-warning" role="alert">{{ squidPendingText }}</p>
+        <div v-if="squidSettlements.length" class="squid-settlement-box" aria-label="鱿鱼赔付结算">
+          <header>
+            <span class="squid-settlement-title">本轮赔付结算</span>
+            <span class="squid-settlement-total">共 {{ squidSettlementTotal }} 筹码</span>
+          </header>
+          <ul class="squid-settlement-list">
+            <li v-for="item in squidSettlements" :key="`${item.squidId}-${item.recipientId}`"
+              class="squid-settlement-row" :class="{ pending: !item.settled }">
+              <span class="squid-settlement-flow">
+                <strong class="squid-payer">{{ item.squid }}</strong>
+                <span class="squid-arrow" aria-hidden="true">→</span>
+                <strong class="squid-recipient">{{ item.recipient }}</strong>
+              </span>
+              <span class="squid-settlement-amount">{{ item.amount }} 筹码</span>
+              <span class="squid-settlement-state" :class="{ pending: !item.settled }">
+                {{ item.settled ? '已赔付' : `已赔 ${item.paid}，还欠 ${item.outstanding}` }}
+              </span>
+            </li>
+          </ul>
+        </div>
+        <button v-if="mySquidDebt > 0" class="gold squid-settle" type="button" :disabled="busy || !connected"
+          @click="emit('settle-squid')">结算鱿鱼赔付 {{ mySquidDebt }} 筹码</button>
       </div>
-      <p v-if="squidPendingText" class="squid-warning" role="alert">{{ squidPendingText }}</p>
-      <div v-if="squidSettlements.length" class="squid-settlement-box" aria-label="鱿鱼赔付结算">
-        <header>
-          <span class="squid-settlement-title">🐙 本轮赔付结算</span>
-          <span class="squid-settlement-total">共 {{ squidSettlementTotal }} 筹码</span>
-        </header>
-        <ul class="squid-settlement-list">
-          <li v-for="item in squidSettlements" :key="`${item.squidId}-${item.recipientId}`"
-            class="squid-settlement-row" :class="{ pending: !item.settled }">
-            <span class="squid-settlement-flow">
-              <strong class="squid-payer">{{ item.squid }}</strong>
-              <span class="squid-arrow" aria-hidden="true">→</span>
-              <strong class="squid-recipient">{{ item.recipient }}</strong>
-            </span>
-            <span class="squid-settlement-amount">{{ item.amount }} 筹码</span>
-            <span class="squid-settlement-state" :class="{ pending: !item.settled }">
-              {{ item.settled ? '已赔付' : `已赔 ${item.paid}，还欠 ${item.outstanding}` }}
-            </span>
-          </li>
-        </ul>
-      </div>
-      <button v-if="mySquidDebt > 0" class="gold squid-settle" type="button" :disabled="busy || !connected"
-        @click="emit('settle-squid')">结算鱿鱼赔付 {{ mySquidDebt }} 筹码</button>
     </section>
 
     <section ref="tableStage" class="table-stage">
@@ -615,7 +665,9 @@ onBeforeUnmount(() => {
               <span v-if="seat.player.ai" class="ai-badge">AI</span>
               <span v-if="seat.player.winner" class="winner-badge" title="本手胜者" aria-label="本手胜者">🏆</span>
               <span v-if="table.squid && seat.player.squidMarkers > 0" class="squid-marker-badge"
-                :title="`鱿鱼标记 ×${seat.player.squidMarkers}`" aria-label="鱿鱼标记">🐙 {{ seat.player.squidMarkers }}</span>
+                :title="`鱿鱼标记 ×${seat.player.squidMarkers}`" aria-label="鱿鱼标记">
+                <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#squid-glyph" /></svg>{{ seat.player.squidMarkers }}
+              </span>
               <span v-if="table.squid && seat.player.squidId" class="squid-id-badge"
                 :title="seat.player.squidDebt > 0 ? `鱿鱼，待赔付 ${seat.player.squidDebt}` : '本轮鱿鱼'"
                 aria-label="本轮鱿鱼">鱿鱼</span>

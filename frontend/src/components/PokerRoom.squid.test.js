@@ -45,6 +45,13 @@ function mountRoom(table, playerId = 'me') {
 
 const nextTick = () => new Promise(resolve => setTimeout(resolve, 0))
 
+// 展开明细：状态条整条可点
+async function expandDetail() {
+  const bar = root.querySelector('.squid-bar')
+  bar.click()
+  await nextTick()
+}
+
 beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
 })
@@ -79,13 +86,58 @@ describe('鱿鱼游戏', () => {
     expect(panel.textContent).toContain('60 筹码')
   })
 
+  it('keeps the detail collapsed so the panel only takes one row', async () => {
+    mountRoom(tableWith())
+    await nextTick()
+    // 明细默认收起：面板不再常驻一整块，把牌桌空间让给公共牌和手牌
+    expect(root.querySelector('.squid-detail')).toBeNull()
+    expect(root.querySelector('.squid-bar')).not.toBeNull()
+    // 状态条本身要包含足够的概览信息
+    const bar = root.querySelector('.squid-bar')
+    expect(bar.textContent).toContain('鱿鱼游戏')
+    expect(bar.textContent).toContain('剩余标记')
+    expect(bar.textContent).toContain('赔付')
+  })
+
+  it('expands and collapses the detail on click', async () => {
+    mountRoom(tableWith())
+    await nextTick()
+    expect(root.querySelector('.squid-detail')).toBeNull()
+
+    await expandDetail()
+    expect(root.querySelector('.squid-detail')).not.toBeNull()
+    expect(root.querySelector('.squid-chip')).not.toBeNull()
+
+    await expandDetail()
+    expect(root.querySelector('.squid-detail')).toBeNull()
+  })
+
+  it('shows the marker progress as a single bar instead of one slot per marker', async () => {
+    mountRoom(tableWith({
+      squid: squidState({ markerTotal: 60, markersRemaining: 15 })
+    }))
+    await nextTick()
+    const progress = root.querySelector('.squid-bar-progress')
+    expect(progress).not.toBeNull()
+    // 60 个标记用槽位画会换行撑高面板，改成单条进度条
+    expect(progress.querySelectorAll('.squid-progress-slot')).toHaveLength(0)
+    const fill = progress.querySelector('i > b')
+    expect(fill).not.toBeNull()
+    expect(fill.style.width).toBe('75%')
+    expect(progress.textContent).toContain('45/60')
+  })
+
   it('lists every player with their marker count', async () => {
     mountRoom(tableWith())
     await nextTick()
+    await expandDetail()
     const chips = [...root.querySelectorAll('.squid-chip')]
     expect(chips).toHaveLength(2)
     expect(chips[0].textContent).toContain('Alice')
-    expect(chips[0].textContent).toContain('🐙 ×2')
+    expect(chips[0].textContent).toContain('×2')
+    // 标记图标用内联 SVG 画（不用 emoji，系统字形会跳色）
+    expect(chips[0].querySelector('svg use')).not.toBeNull()
+    expect(chips[0].querySelector('svg use').getAttribute('href')).toBe('#squid-glyph')
     expect(chips[1].textContent).toContain('Bob')
     expect(chips[1].textContent).toContain('无标记')
   })
@@ -115,7 +167,7 @@ describe('鱿鱼游戏', () => {
     await nextTick()
     const badge = root.querySelector('.squid-marker-badge')
     expect(badge).not.toBeNull()
-    expect(badge.textContent).toContain('🐙')
+    expect(badge.querySelector('svg use')).not.toBeNull()
     expect(badge.textContent).toContain('2')
   })
 
@@ -132,6 +184,7 @@ describe('鱿鱼游戏', () => {
       players: [seat('me', 'Alice', 2600, { squidDebt: 0 }), seat('bob', 'Bob', 1400, { squidDebt: 60 })]
     }), 'bob')
     await nextTick()
+    // 有待结清赔付时明细必须自动展开：警告和结算按钮不能被折叠藏起来
     const warning = root.querySelector('.squid-warning')
     expect(warning).not.toBeNull()
     expect(warning.textContent).toContain('Bob 需要赔付')
@@ -164,6 +217,7 @@ describe('鱿鱼游戏', () => {
       })
     }))
     await nextTick()
+    await expandDetail()
     const box = root.querySelector('.squid-settlement-box')
     expect(box).not.toBeNull()
     expect(box.textContent).toContain('本轮赔付结算')

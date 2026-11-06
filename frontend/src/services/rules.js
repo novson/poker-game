@@ -1,3 +1,5 @@
+import { remainingUntil } from './clock'
+
 export function callAmount(table, player) {
   return Math.max(0, table.currentBet - (player?.streetBet || 0))
 }
@@ -82,9 +84,14 @@ export function topUpWaitPrompt(table) {
 /**
  * 结果画面的保留剩余毫秒数。每手打完服务端都会留 5 秒（showdownHoldUntil），
  * 这段时间内既不能自动开下一局，也不显示「开始下一局」按钮。
+ *
+ * deadline 是服务端下发的绝对时间戳，now 是本机时刻（内部会换算成服务端时间），
+ * 所以本机时钟不准时也不会把整个保留窗口算错。
  */
 export function showdownHoldRemaining(table, now = Date.now()) {
-  return Math.max(0, (Number(table?.showdownHoldUntil) || 0) - now)
+  const deadline = Number(table?.showdownHoldUntil) || 0
+  if (deadline <= 0) return 0
+  return remainingUntil(deadline, now)
 }
 
 export function canAutoStartNextHand(table, player, now = Date.now()) {

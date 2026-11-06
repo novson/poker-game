@@ -75,7 +75,10 @@ public final class TableViews {
                             List<String> communityCards, List<PlayerView> players, long version,
                             long showdownHoldUntil, boolean canShowCards, boolean isOwner,
                             boolean settlementOpen, boolean canSettle, SettlementView settlement,
-                            SquidView squid) {
+                            SquidView squid,
+                            // 服务端当前时刻（epoch ms）。客户端用它校准自己的时钟，
+                            // 否则客户端时钟不准时行动倒计时与结果保留窗口都会算错。
+                            long serverTime) {
         public static TableView from(PokerTable table, UUID viewerId) {
             boolean showdown = table.phase() == GamePhase.SHOWDOWN;
             List<PlayerView> playerViews = table.players().stream().map(player -> {
@@ -105,7 +108,8 @@ public final class TableViews {
                     table.isOwner(viewerId),
                     table.settlementOpen(), table.canSettle(viewerId),
                     table.settlementOpen() ? SettlementView.from(table.settlementPlan()) : null,
-                    squidView(table));
+                    squidView(table),
+                    System.currentTimeMillis());
         }
 
         private static SquidView squidView(PokerTable table) {
