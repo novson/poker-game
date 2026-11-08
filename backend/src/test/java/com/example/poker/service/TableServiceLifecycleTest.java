@@ -22,6 +22,22 @@ class TableServiceLifecycleTest {
     @TempDir Path directory;
 
     @Test
+    void letsAGuestPickASpecificSeatWhenJoiningFromTheLobby() {
+        PokerSettings settings = new PokerSettings((Path) null);
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        Path file = directory.resolve("seat-accounts.json");
+        AccountService accounts = new AccountService(mapper, settings, file);
+        TableService service = new TableService(mock(SimpMessagingTemplate.class), settings, accounts);
+
+        var host = service.create("选座桌", "Host", 4, false, 0);
+        var picked = service.join(host.table().id(), "Picked", null, null, 2_000, 3);
+        int seat = service.get(host.table().id(), picked.playerId(), picked.reconnectToken())
+                .players().stream().filter(player -> player.id().equals(picked.playerId()))
+                .findFirst().orElseThrow().seat();
+        assertThat(seat).isEqualTo(3);
+    }
+
+    @Test
     void settlesAQueuedLeaveBeforeReleasingTheAccountAndPublishing() {
         PokerSettings settings = new PokerSettings((Path) null);
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();

@@ -36,7 +36,8 @@ public class TableController {
 
     @PostMapping("/{tableId}/join")
     public TableViews.SessionView join(@PathVariable UUID tableId, @Valid @RequestBody Requests.JoinTable request) {
-        return service.join(tableId, request.nickname(), request.accountId(), request.accountToken(), request.buyIn());
+        return service.join(tableId, request.nickname(), request.accountId(), request.accountToken(),
+                request.buyIn(), request.seat());
     }
 
     @GetMapping("/{tableId}")

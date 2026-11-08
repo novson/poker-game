@@ -16,13 +16,16 @@ public final class TableViews {
     public record TableSummary(UUID id, String name, int playerCount, int maxPlayers, int aiCount,
                                boolean privateTable, int totalChips, int smallBlind, int bigBlind,
                                int minBuyIn, int defaultBuyIn, int maxBuyIn,
-                               GamePhase phase, String phaseLabel, Instant createdAt) {
+                               GamePhase phase, String phaseLabel, Instant createdAt,
+                               List<Integer> occupiedSeats) {
         public static TableSummary from(PokerTable table) {
             int aiCount = (int) table.players().stream().filter(PlayerState::ai).count();
+            List<Integer> occupiedSeats = table.players().stream()
+                    .map(PlayerState::seat).sorted().toList();
             return new TableSummary(table.id(), table.name(), table.players().size(), table.maxPlayers(), aiCount,
                     table.privateTable(), table.totalChips(), table.smallBlind(), table.bigBlind(),
                     table.minBuyIn(), table.defaultBuyIn(), table.maxBuyIn(),
-                    table.phase(), table.phase().label(), table.createdAt());
+                    table.phase(), table.phase().label(), table.createdAt(), occupiedSeats);
         }
     }
 

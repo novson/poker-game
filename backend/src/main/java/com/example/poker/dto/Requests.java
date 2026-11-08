@@ -46,7 +46,9 @@ public final class Requests {
     public record JoinTable(@NotBlank @Size(max = 16) String nickname,
                             UUID accountId,
                             UUID accountToken,
-                            @Min(1) @Max(10_000_000) Integer buyIn) {}
+                            @Min(1) @Max(10_000_000) Integer buyIn,
+                            /** 指定座位号（0 起）；省略则自动落第一个空位。 */
+                            @Min(0) @Max(5) Integer seat) {}
     public record PlayerCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken) {}
     public record ChipCommand(@NotNull UUID playerId, @NotNull UUID reconnectToken,
                               @Min(1) @Max(10_000_000) int amount) {}

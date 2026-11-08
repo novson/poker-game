@@ -20,6 +20,19 @@ class PokerTableLifecycleTest {
             1_000, 10, 20, Deck::new, clock);
 
     @Test
+    void letsAPlayerPickASeatAndRejectsTakenOrOutOfRangeSeats() {
+        PokerTable room = new PokerTable(UUID.randomUUID(), "选座", 6, 1_000, 10, 20, Deck::new, clock);
+        PlayerState alice = room.join("Alice");
+        PlayerState bob = room.join("Bob", 1_000, 4);
+        assertThat(alice.seat()).isEqualTo(0);
+        assertThat(bob.seat()).isEqualTo(4);
+
+        assertThatThrownBy(() -> room.join("Carol", 1_000, 0)).hasMessageContaining("座位已被占用");
+        assertThatThrownBy(() -> room.join("Carol", 1_000, 6)).hasMessageContaining("座位号无效");
+        assertThatThrownBy(() -> room.join("Carol", 1_000, -1)).hasMessageContaining("座位号无效");
+    }
+
+    @Test
     void keepsAQueuedAllInPlayerEligibleUntilSettlementAndReusesTheirSeat() {
         PlayerState alice = table.join("Alice");
         PlayerState bob = table.join("Bob");

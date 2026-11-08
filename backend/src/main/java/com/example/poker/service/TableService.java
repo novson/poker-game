@@ -143,11 +143,16 @@ public class TableService {
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname, Integer buyIn) {
-        return join(tableId, nickname, null, null, buyIn);
+        return join(tableId, nickname, null, null, buyIn, null);
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname, UUID accountId, UUID accountToken,
                                        Integer buyIn) {
+        return join(tableId, nickname, accountId, accountToken, buyIn, null);
+    }
+
+    public TableViews.SessionView join(UUID tableId, String nickname, UUID accountId, UUID accountToken,
+                                       Integer buyIn, Integer seat) {
         AccountService.StoredIdentity identity = accountId == null || accountToken == null
                 ? null : accounts.identity(accountId, accountToken);
         if (identity != null) ensureAccountAvailable(identity.id());
@@ -155,9 +160,9 @@ public class TableService {
             if (table.privateTable()) throw new IllegalArgumentException("私人牌桌不能从大厅加入");
             PlayerState player;
             if (accountId == null || accountToken == null) {
-                player = table.join(nickname.trim(), buyIn);
+                player = table.join(nickname.trim(), buyIn, seat);
             } else {
-                player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
+                player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips(), seat);
             }
             publish(tableId);
             return session(table, player);

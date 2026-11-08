@@ -47,6 +47,25 @@ function joinBuyIn(item) {
   return buyInState(item, joinBuyIns.value[item.id], accountProfile.value?.chips ?? item.totalChips)
 }
 const joinBuyIns = ref({})
+const joinSeats = ref({})
+function occupiedSeatsOf(item) {
+  return new Set(item.occupiedSeats || [])
+}
+function seatsFor(item) {
+  return Array.from({ length: item.maxPlayers }, (_, seat) => ({
+    seat, label: seat + 1, occupied: occupiedSeatsOf(item).has(seat)
+  }))
+}
+function effectiveSeat(item) {
+  const free = seatsFor(item).filter(seat => !seat.occupied).map(seat => seat.seat)
+  if (!free.length) return null
+  const chosen = joinSeats.value[item.id]
+  return chosen != null && free.includes(chosen) ? chosen : free[0]
+}
+function selectSeat(item, seat) {
+  if (occupiedSeatsOf(item).has(seat)) return
+  joinSeats.value[item.id] = seat
+}
 const pendingTasks = ref(0)
 const busy = computed(() => pendingTasks.value > 0)
 const tableSynced = ref(false)
@@ -361,7 +380,7 @@ async function join(item) {
     const account = await ensureAccount()
     if (!account) return
     if (await restoreAccountSeat(true)) return
-    const session = await api.joinTable(item.id, nickname.value, Number(joinBuyIns.value[item.id]), account)
+    const session = await api.joinTable(item.id, nickname.value, Number(joinBuyIns.value[item.id]), account, effectiveSeat(item))
     remember(session)
   }) } finally { seatPending.value = false }
 }
@@ -803,6 +822,16 @@ onBeforeUnmount(() => {
           <span class="table-stakes"><strong>{{ item.smallBlind }}/{{ item.bigBlind }} · {{ item.playerCount }}/{{ item.maxPlayers }} 人</strong><small>总额度 {{ item.totalChips }}</small></span>
           <label class="row-buy-in">带入<input v-model.number="joinBuyIns[item.id]" type="number" :min="joinBuyIn(item).minimum" :max="joinBuyIn(item).maximum" step="1" :aria-invalid="!joinBuyIn(item).valid" :aria-describedby="`buy-in-${item.id}`" :disabled="!tableAvailability(item).available" /><small :id="`buy-in-${item.id}`" :class="{ invalid: !joinBuyIn(item).valid }">{{ joinBuyIn(item).message || `范围 ${joinBuyIn(item).minimum}–${joinBuyIn(item).maximum}` }}</small></label>
           <button :disabled="entryBlocked || !!tablesError || !joinBuyIn(item).valid || !tableAvailability(item).available" @click="join(item)">{{ tableAvailability(item).label }} <span v-if="tableAvailability(item).available" aria-hidden="true">→</span></button>
+          <div class="seat-picker" role="group" aria-label="选择座位">
+            <span class="seat-picker-label">选座</span>
+            <div class="seat-options">
+              <button v-for="s in seatsFor(item)" :key="s.seat" type="button" class="seat-option"
+                :class="{ occupied: s.occupied, selected: s.seat === effectiveSeat(item) }"
+                :disabled="s.occupied || !tableAvailability(item).available"
+                :aria-pressed="s.seat === effectiveSeat(item)" :aria-label="`座位 ${s.label}`"
+                @click="selectSeat(item, s.seat)">{{ s.label }}</button>
+            </div>
+          </div>
         </article>
       </div>
       <div v-else-if="tablesLoaded && !tablesError && !tablesLoading" class="empty-lobby"><span>♠</span><strong>今晚的第一张牌桌，等你开局</strong><small>完成上方设置后即可立即入座</small></div>

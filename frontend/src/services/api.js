@@ -41,9 +41,9 @@ export const api = {
   createTable: (payload) => request('/api/tables', {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload)
   }),
-  joinTable: (tableId, nickname, buyIn, account) => request(`/api/tables/${tableId}/join`, {
+  joinTable: (tableId, nickname, buyIn, account, seat) => request(`/api/tables/${tableId}/join`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ nickname, buyIn,
-      accountId: account?.accountId, accountToken: account?.accountToken })
+      accountId: account?.accountId, accountToken: account?.accountToken, seat })
   }),
   reconnect: (tableId, playerId, reconnectToken) => request(`/api/tables/${tableId}/reconnect`, {
     method: 'POST', headers: jsonHeaders, body: JSON.stringify({ playerId, reconnectToken })
