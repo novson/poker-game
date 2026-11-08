@@ -153,11 +153,38 @@ public final class PokerTable {
     public synchronized List<PlayerState> removeLeavingPlayers() {
         if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN) return List.of();
         List<PlayerState> departed = players.stream().filter(PlayerState::leaving).toList();
+        if (departed.isEmpty()) return List.of();
         for (PlayerState player : departed) {
+            settleSquidDebtBeforeLeaving(player);
             if (player.chips() > 0) player.cashOut(player.chips());
         }
         players.removeAll(departed);
         return departed;
+    }
+
+    /**
+     * 欠着鱿鱼罚金的人要离桌：离桌后没人能再替 TA 补码/结算，挂着欠款只会把牌桌锁死
+     * 在「不允许开始下一局」。所以离桌前用全部筹码（桌上 + 备用）尽量付清，付不清的免除；
+     * 收款人也不在桌上时义务直接作废。
+     */
+    private void settleSquidDebtBeforeLeaving(PlayerState player) {
+        if (!squidGame || squidObligations.isEmpty()) return;
+        boolean owes = squidObligations.stream()
+                .anyMatch(obligation -> obligation.squidId().equals(player.id()) && obligation.amount() > 0);
+        if (!owes) return;
+        for (SquidObligation obligation : squidObligations) {
+            if (!obligation.squidId().equals(player.id()) || obligation.amount() <= 0) continue;
+            PlayerState recipient = players.stream()
+                    .filter(p -> p.id().equals(obligation.recipientId())).findFirst().orElse(null);
+            paySquidObligation(obligation, player, recipient, true);
+        }
+        squidDebt.clear();
+        for (SquidObligation obligation : squidObligations) {
+            squidDebt.merge(obligation.squidId(), obligation.amount(), Integer::sum);
+        }
+        squidPenaltyPending = squidDebt.values().stream().anyMatch(amount -> amount > 0);
+        if (!squidPenaltyPending) squidRoundResolved = true;
+        message = message + "；" + player.nickname() + " 已离桌，未结清的鱿鱼赔付已按可用筹码处理";
     }
 
     public synchronized boolean expireTurn(Instant now) {
@@ -773,6 +800,7 @@ public final class PokerTable {
      */
     private void applySquidPayments() {
         squidDebt.clear();
+        int waived = 0;
         for (SquidObligation obligation : squidObligations) {
             if (obligation.amount() <= 0) continue;
             // 记录本轮罚金总额：前端要靠它区分「筹码低是因为被罚」还是「真的缺钱」，
@@ -786,13 +814,9 @@ public final class PokerTable {
                 obligation.settle(obligation.amount());
                 continue;
             }
-            int payable = Math.min(obligation.amount(), squid.chips());
-            if (payable > 0) {
-                squid.transferChips(payable);
-                recipient.win(payable);
-                obligation.settle(payable);
-            }
+            waived += paySquidObligation(obligation, squid, recipient, squid.ai());
         }
+        if (waived > 0) appendSquidNotice("AI 筹码不足以付清罚金，免除 " + waived + " 筹码");
 
         for (SquidObligation obligation : squidObligations) {
             squidDebt.merge(obligation.squidId(), obligation.amount(), Integer::sum);
@@ -806,6 +830,40 @@ public final class PokerTable {
             squidRoundResolved = true;
             appendSquidNotice("鱿鱼赔付已完成（" + squidIdNames() + "）");
         }
+    }
+
+    /**
+     * 执行一笔鱿鱼赔付，返回被免除的金额。
+     *
+     * 真人只用桌上筹码付（要不要补码是玩家自己的决定，界面上有「结算赔付」按钮）。
+     * AI 没有人替它点按钮，允许直接从备用筹码调过来付清 —— 否则 AI 欠款会让整张牌桌
+     * 永远停在「不允许开始下一局」上，没有任何路径能替它结清。
+     * 离桌的欠款人同理：离桌后不可能再补码，也允许动用备用筹码。
+     *
+     * allowReserve 且全部筹码赔光仍不够的，剩余部分免除：欠款人已经一分钱都拿不出来，
+     * 挂着这笔账只会把牌桌锁死。收款人已不在桌上时义务作废（钱无处可交）。
+     */
+    private int paySquidObligation(SquidObligation obligation, PlayerState squid,
+                                   PlayerState recipient, boolean allowReserve) {
+        if (recipient == null) {
+            obligation.settle(obligation.amount());
+            return obligation.amount();
+        }
+        int amount = obligation.amount();
+        if (amount <= 0) return 0;
+        int payable = Math.min(amount, allowReserve ? squid.totalChips() : squid.chips());
+        if (payable > squid.chips()) squid.drawFromReserve(payable - squid.chips());
+        if (payable > 0) {
+            squid.transferChips(payable);
+            recipient.win(payable);
+            obligation.settle(payable);
+        }
+        int waived = obligation.amount();
+        if (waived > 0 && allowReserve && squid.totalChips() == 0) {
+            obligation.settle(waived);
+            return waived;
+        }
+        return 0;
     }
 
     private String nicknameOf(UUID playerId) {
@@ -844,14 +902,9 @@ public final class PokerTable {
         for (SquidObligation obligation : squidObligations) {
             if (!obligation.squidId().equals(squid.id())) continue;
             touched = true;
-            int payable = Math.min(obligation.amount(), squid.chips());
-            if (payable > 0) {
-                squid.transferChips(payable);
-                PlayerState recipient = players.stream()
-                        .filter(p -> p.id().equals(obligation.recipientId())).findFirst().orElse(null);
-                if (recipient != null) recipient.win(payable);
-                obligation.settle(payable);
-            }
+            PlayerState recipient = players.stream()
+                    .filter(p -> p.id().equals(obligation.recipientId())).findFirst().orElse(null);
+            paySquidObligation(obligation, squid, recipient, squid.ai());
         }
         if (!touched) return false;
         squidDebt.clear();

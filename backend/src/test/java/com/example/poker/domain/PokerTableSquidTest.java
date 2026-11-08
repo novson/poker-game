@@ -472,6 +472,77 @@ class PokerTableSquidTest {
         assertThat(table.message()).startsWith(messageBefore);
     }
 
+    @Test
+    void aiSquidPaysFromReserveSoTheNextHandCanStart() {
+        // 私人 AI 桌：罚金 10 BB = 200，AI 带入 200、备用 800，桌上筹码（交完盲注后约 180）不够付
+        PokerTable table = new PokerTable(UUID.randomUUID(), "AI 鱿鱼桌", 2, 1_000, 10, 200, 1_000,
+                10, 20, true, true, 1, 10);
+        PlayerState alice = table.join("Alice");
+        PlayerState ai = table.joinAi("AI·小河");
+        table.start(alice.id());
+        foldToWinner(table, alice);
+
+        // AI 被判鱿鱼，欠 200：必须能从备用筹码调过来付清，而不是把牌桌锁死
+        assertThat(table.squidId(ai.id())).isTrue();
+        assertThat(table.squidPenaltyPending()).isFalse();
+        assertThat(table.squidDebt(ai.id())).isZero();
+        assertThat(ai.chips()).isZero();
+        assertThat(ai.reserveChips()).isEqualTo(780);
+        assertThat(alice.chips()).isEqualTo(420);
+
+        // 下一局能正常开：标记清空、轮次 +1、AI 自动补码回到带入（补到 200 后交了小盲 10）
+        table.start(alice.id());
+        assertThat(table.phase()).isEqualTo(GamePhase.PRE_FLOP);
+        assertThat(table.squidRound()).isEqualTo(2);
+        assertThat(table.squidMarkersRemaining()).isEqualTo(1);
+        assertThat(ai.chips()).isEqualTo(190);
+    }
+
+    @Test
+    void waivesTheRemainingAiSquidDebtWhenTheAiCannotEverPay() {
+        // 罚金 100 BB = 2000，AI 全部筹码（带入 200 + 备用 300）只有 500 → 永远赔不完
+        PokerTable table = new PokerTable(UUID.randomUUID(), "AI 鱿鱼桌", 2, 500, 10, 200, 500,
+                10, 20, true, true, 1, 100);
+        PlayerState alice = table.join("Alice");
+        PlayerState ai = table.joinAi("AI·小河");
+        table.start(alice.id());
+        foldToWinner(table, alice);
+
+        // 赔光全部筹码后剩余罚金免除，牌桌不能再被这笔永远收不回来的账卡住
+        assertThat(table.squidPenaltyPending()).isFalse();
+        assertThat(ai.totalChips()).isZero();
+        assertThat(table.message()).contains("免除");
+        // AI 一分钱不剩 → 开不了下一局的原因是「人不够」，而不是「鱿鱼赔付没结清」
+        assertThatThrownBy(() -> table.start(alice.id()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("至少需要两名");
+    }
+
+    @Test
+    void departingSquidDebtorSettlesFromStackAndReserveBeforeLeaving() {
+        // 罚金 10 BB = 200，Bob 判鱿鱼后桌上只有约 180，欠款必须动用备用筹码在离桌前结掉
+        PokerTable table = new PokerTable(UUID.randomUUID(), "鱿鱼桌", 2, 1_000, 10, 200, 1_000,
+                10, 20, true, true, 1, 10);
+        PlayerState alice = table.join("Alice");
+        PlayerState bob = table.join("Bob");
+        table.start(alice.id());
+        foldToWinner(table, alice);
+        assertThat(table.squidPenaltyPending()).isTrue();
+
+        bob.requestLeave();
+        table.removeLeavingPlayers();
+
+        // Bob 离桌前用桌上 + 备用筹码付清 200 罚金，余下 780 带走
+        assertThat(bob.totalChips()).isEqualTo(780);
+        assertThat(alice.chips()).isEqualTo(420);
+        assertThat(table.squidPenaltyPending()).isFalse();
+        assertThat(table.message()).contains("已离桌");
+        // 桌上只剩 Alice 一人：卡的是「人不够」，不是鱿鱼赔付
+        assertThatThrownBy(() -> table.start(alice.id()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("至少需要两名");
+    }
+
     private static Card card(Rank rank, Suit suit) {
         return new Card(rank, suit);
     }

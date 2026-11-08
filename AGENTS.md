@@ -189,7 +189,7 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 
 - **AI 回合循环**（`runAiTurns`）上限 500 次；正常一手牌 AI 行动 < 20 次。触发 500 上限说明状态机卡死，需要排查。
 - **每个服务指令完成后广播**：`runAiTurns()` 内的多次 AI 动作完成后统一发布版本号；不会逐个广播 AI 动作。
-- **`synchronizeAccounts` 在指令收尾时执行**：余额变化时更新账号；只有 SHOWDOWN 才为参加了本手的玩家记录战绩。预约离桌的玩家先结算，之后释放座位，最后广播；战绩按牌桌和手数去重。
+- **`synchronizeAccounts` 在指令收尾时执行**：只有 SHOWDOWN / WAITING 才把余额写回账号（手牌进行中 `totalChips` 不含底池投入，写盘会在重启时丢掉底池里的钱）；只有 SHOWDOWN 才为参加了本手的玩家记录战绩。预约离桌的玩家先结算，之后释放座位，最后广播；战绩按牌桌和手数去重。
 
 ### 3.7 错误响应统一格式
 
@@ -878,16 +878,20 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/api/admin/settin
 - 唯一赢下**主池**的玩家拿 1 个鱿鱼标记；**主池平分不发**，**只赢边池不发**。
 - 标记可以**累计**（同一玩家多手连赢就多个）。
 - 标记发完后，**所有没有标记的人都是鱿鱼**，要给**每个有标记的玩家各 xx BB**（AI 座位同样参与）。
-- 赔付筹码不足时**不允许开始下一局**，必须先补码并结清赔付。
+- 赔付筹码不足时**不允许开始下一局**（真人），必须先补码并结清赔付。
+- **AI / 离桌者的赔付自动处理（2026-11-08）**：AI 与「欠款中离桌」的人没人替它们点结算按钮，
+  所以 `paySquidObligation()` 允许它们动用**备用筹码**（`PlayerState.drawFromReserve()`，不改状态）付清；
+  赔光全部筹码仍不够的剩余部分**免除**（挂账只会把牌桌锁死，没有任何路径能收到这笔钱）。
+  真人留在桌上时仍沿用「只扣桌上筹码、欠款挂账、补码后结算」的既有行为。
 - 一轮结束后标记清空、标记池恢复，机制**重复**。
 
 **代码位置**：
 
 | 层 | 文件 | 要点 |
 |---|---|---|
-| 领域 | `domain/PokerTable.java` | `squidGame/squidMarkerTotal/squidPenaltyBigBlinds` 配置；`grantSquidMarker()` 发标记；`resolveSquidRound()` 判鱿鱼；`applySquidPayments()` 执行赔付；`settleSquidPenalty()` 补码后结清；`ensureNoPendingSquidPenalty()` 卡开局 |
+| 领域 | `domain/PokerTable.java` | `squidGame/squidMarkerTotal/squidPenaltyBigBlinds` 配置；`grantSquidMarker()` 发标记；`resolveSquidRound()` 判鱿鱼；`applySquidPayments()` 执行赔付；`settleSquidPenalty()` 补码后结清；`ensureNoPendingSquidPenalty()` 卡开局；`paySquidObligation()` 统一赔付（AI/离桌者动用备用、赔光免除） |
 | 领域 | `domain/SquidObligation.java` | 一笔「鱿鱼 → 收赔付的人」赔付明细：`total` 应赔、`paid` 已赔、`amount()` 欠款、`settled()` 是否结清 |
-| 领域 | `domain/PlayerState.java` | `squidMarkers`（累计）、`transferChips()`（赔付转移，不计入下注） |
+| 领域 | `domain/PlayerState.java` | `squidMarkers`（累计）、`transferChips()`（赔付转移，不计入下注）、`drawFromReserve()`（AI/离桌者赔付动用备用，不改状态） |
 | DTO | `dto/Requests.java` | `squidGame` / `squidMarkerCount`(2–60) / `squidPenaltyBigBlinds`(1–100) |
 | DTO | `dto/TableViews.java` | `TableView.squid`（`SquidView`）、`PlayerView.squidMarkers/squidId/squidDebt`、`SquidView.settlements`（`SquidSettlement` 列表） |
 | 接口 | `POST /api/tables/{id}/squid/settle` | 鱿鱼补码后调用结清赔付 |
@@ -911,8 +915,12 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:18080/api/admin/settin
 - **标记和鱿鱼名单要留到下一局开始才清空**（`squidRoundResolved` 标志），否则结果画面看不到「谁拿了几个标记 / 谁被判鱿鱼」。清空动作在 `start()` 里做。
 - **赔付在每手结束时立刻执行**（能付多少付多少），付不完的部分记成 `squidObligations` 挂账。
 - 赔付会**改变桌上筹码**，但不影响下注额（`transferChips()` 不动 `streetBet/handBet`）。
+- **AI 与离桌者必须能自动结清**：AI 不可能去点「结算赔付」按钮；欠款中离桌的人离桌后也没人能替它结。
+  两者都要么动用备用筹码付清、要么赔光后免除，否则 `squidPenaltyPending` 永久为 true，牌桌再也开不了下一局。
+  离桌结算在 `removeLeavingPlayers()` 里做（`settleSquidDebtBeforeLeaving()`），
+  因此**离桌者的最终余额要在 `finishUpdate()` 里补写一次账号**（离桌时可能刚动过筹码）。
 
-**测试**：`backend/.../domain/PokerTableSquidTest.java`（15 例）、
+**测试**：`backend/.../domain/PokerTableSquidTest.java`（18 例，含 AI 自动赔付 / 离桌结清）、
 `frontend/src/components/PokerRoom.squid.test.js`（10 例）、
 `frontend/src/services/rules.test.js`（3 例）。
 端到端冒烟脚本：`.workbuddy/smoke_squid.py`（37 项断言，需先起隔离实例，见 §13.12）。

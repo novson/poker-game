@@ -383,7 +383,12 @@ public class TableService {
     private void finishUpdate(PokerTable table) {
         runAiTurns(table);
         synchronizeAccounts(table);
-        table.removeLeavingPlayers().forEach(player -> lastEmotes.remove(player.id()));
+        table.removeLeavingPlayers().forEach(player -> {
+            lastEmotes.remove(player.id());
+            // 离桌那一刻可能刚用桌上/备用筹码结过鱿鱼罚金（removeLeavingPlayers 内），
+            // 账号余额要以离桌后的最终值为准补写一次，别停在旧值。
+            if (player.accountId() != null) accounts.updateBalance(player.accountId(), player.totalChips());
+        });
         if (table.players().stream().noneMatch(player -> !player.ai())) {
             tables.remove(table.id(), table);
             table.players().forEach(player -> lastEmotes.remove(player.id()));
@@ -428,7 +433,13 @@ public class TableService {
     private void synchronizeAccounts(PokerTable table) {
         for (PlayerState player : table.players()) {
             if (player.ai() || player.accountId() == null) continue;
-            accounts.updateBalance(player.accountId(), player.totalChips());
+            // 手牌进行中 totalChips 不含已投入底池的筹码：此刻把余额落盘，服务一旦重启
+            // （牌局在内存里，重启即丢）账号就会停在手牌中途的数值，投进底池的钱既不在
+            // 账号也不在牌局，凭空消失。所以只在两局之间同步余额，崩溃时最多回退到
+            // 上一手结束时的快照。战绩记录同样只在 SHOWDOWN 时产生。
+            if (table.phase() == GamePhase.SHOWDOWN || table.phase() == GamePhase.WAITING) {
+                accounts.updateBalance(player.accountId(), player.totalChips());
+            }
             if (table.phase() == GamePhase.SHOWDOWN && table.participatedInHand(player.id())) {
                 int netChips = player.totalChips() - table.handStartingTotal(player.id());
                 accounts.recordHand(player.accountId(), new AccountService.HandResult(

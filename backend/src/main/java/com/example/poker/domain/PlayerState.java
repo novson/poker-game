@@ -72,6 +72,17 @@ public final class PlayerState {
         if (amount < 0 || amount > chips) throw new IllegalArgumentException("筹码不足");
         chips -= amount;
     }
+
+    /**
+     * 鱿鱼赔付专用：把备用筹码调到桌上用于赔付。与普通补码不同，这里不改玩家状态
+     * （普通补码的 sit() 会把 FOLDED/ALL_IN 翻成 SITTING，破坏牌局结果画面）。
+     */
+    public void drawFromReserve(int amount) {
+        if (amount <= 0) return;
+        if (amount > reserveChips) throw new IllegalArgumentException("可用备用筹码不足");
+        reserveChips -= amount;
+        chips += amount;
+    }
     public void markTimedOut() { timedOut = true; }
     public void requestLeave() { leaving = true; }
     public PlayerStatus status() { return status; }
