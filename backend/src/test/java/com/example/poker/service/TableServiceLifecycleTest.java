@@ -22,7 +22,7 @@ class TableServiceLifecycleTest {
     @TempDir Path directory;
 
     @Test
-    void letsAGuestPickASpecificSeatWhenJoiningFromTheLobby() {
+    void letsAPlayerMoveToAnEmptySeatThroughTheService() {
         PokerSettings settings = new PokerSettings((Path) null);
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         Path file = directory.resolve("seat-accounts.json");
@@ -30,9 +30,10 @@ class TableServiceLifecycleTest {
         TableService service = new TableService(mock(SimpMessagingTemplate.class), settings, accounts);
 
         var host = service.create("选座桌", "Host", 4, false, 0);
-        var picked = service.join(host.table().id(), "Picked", null, null, 2_000, 3);
-        int seat = service.get(host.table().id(), picked.playerId(), picked.reconnectToken())
-                .players().stream().filter(player -> player.id().equals(picked.playerId()))
+        var bob = service.join(host.table().id(), "Bob", 2_000);
+        service.changeSeat(host.table().id(), bob.playerId(), bob.reconnectToken(), 3);
+        int seat = service.get(host.table().id(), bob.playerId(), bob.reconnectToken())
+                .players().stream().filter(player -> player.id().equals(bob.playerId()))
                 .findFirst().orElseThrow().seat();
         assertThat(seat).isEqualTo(3);
     }

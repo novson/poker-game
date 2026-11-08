@@ -20,16 +20,33 @@ class PokerTableLifecycleTest {
             1_000, 10, 20, Deck::new, clock);
 
     @Test
-    void letsAPlayerPickASeatAndRejectsTakenOrOutOfRangeSeats() {
-        PokerTable room = new PokerTable(UUID.randomUUID(), "选座", 6, 1_000, 10, 20, Deck::new, clock);
+    void letsAPlayerChangeToAnEmptySeatAndRejectsTakenOrOutOfRangeSeats() {
+        PokerTable room = new PokerTable(UUID.randomUUID(), "换座", 6, 1_000, 10, 20, Deck::new, clock);
         PlayerState alice = room.join("Alice");
-        PlayerState bob = room.join("Bob", 1_000, 4);
+        PlayerState bob = room.join("Bob");
         assertThat(alice.seat()).isEqualTo(0);
-        assertThat(bob.seat()).isEqualTo(4);
+        assertThat(bob.seat()).isEqualTo(1);
 
-        assertThatThrownBy(() -> room.join("Carol", 1_000, 0)).hasMessageContaining("座位已被占用");
-        assertThatThrownBy(() -> room.join("Carol", 1_000, 6)).hasMessageContaining("座位号无效");
-        assertThatThrownBy(() -> room.join("Carol", 1_000, -1)).hasMessageContaining("座位号无效");
+        room.changeSeat(bob.id(), bob.reconnectToken(), 4);
+        assertThat(bob.seat()).isEqualTo(4);
+        assertThat(room.players()).extracting(PlayerState::seat).containsExactly(0, 4);
+
+        assertThatThrownBy(() -> room.changeSeat(alice.id(), alice.reconnectToken(), 4))
+                .hasMessageContaining("座位已被占用");
+        assertThatThrownBy(() -> room.changeSeat(alice.id(), alice.reconnectToken(), 6))
+                .hasMessageContaining("座位号无效");
+        assertThatThrownBy(() -> room.changeSeat(alice.id(), alice.reconnectToken(), -1))
+                .hasMessageContaining("座位号无效");
+    }
+
+    @Test
+    void refusesToChangeSeatDuringAHand() {
+        PokerTable room = new PokerTable(UUID.randomUUID(), "换座", 6, 1_000, 10, 20, Deck::new, clock);
+        PlayerState alice = room.join("Alice");
+        PlayerState bob = room.join("Bob");
+        room.start(alice.id());
+        assertThatThrownBy(() -> room.changeSeat(bob.id(), bob.reconnectToken(), 3))
+                .hasMessageContaining("两局之间");
     }
 
     @Test

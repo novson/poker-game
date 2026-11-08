@@ -18,18 +18,20 @@ function tableWith(players, extra = {}) {
     canSettle: false, settlementOpen: false, settlement: null, players, ...extra }
 }
 
-let app, root, started, chipCalls
+let app, root, started, chipCalls, seatCalls
 
 function mountRoom(table, playerId = 'me') {
   root = document.createElement('div')
   document.body.append(root)
   started = []
   chipCalls = []
+  seatCalls = []
   app = createApp({
     render: () => h(PokerRoom, {
       table, playerId, busy: false, connected: true, refreshing: false,
       onStart: () => started.push(true),
-      onChips: (type, amount) => chipCalls.push({ type, amount })
+      onChips: (type, amount) => chipCalls.push({ type, amount }),
+      onChangeSeat: (seat) => seatCalls.push(seat)
     })
   })
   app.mount(root)
@@ -190,5 +192,36 @@ describe('starting the next hand', () => {
     await clickStart()
     expect(window.confirm).not.toHaveBeenCalled()
     expect(started).toHaveLength(1)
+  })
+})
+
+describe('changing seats', () => {
+  it('renders empty seats as clickable buttons between hands and emits the target seat', async () => {
+    mountRoom(tableWith([
+      seat('me', 'Alice', 2000, { seat: 0 }),
+      seat('bob', 'Bob', 1500, { seat: 2 })
+    ], { phase: 'WAITING' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const emptySeats = root.querySelectorAll('.empty-seat')
+    expect(emptySeats).toHaveLength(4) // 6 人桌，0 和 2 已坐
+    expect(emptySeats[0].disabled).toBe(false)
+
+    // 点击第一个空座位（viewer seat=0 时，第一个空位是 actualSeat 1）
+    emptySeats[0].click()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(seatCalls).toEqual([1])
+  })
+
+  it('disables empty seats during a hand', async () => {
+    mountRoom(tableWith([
+      seat('me', 'Alice', 2000, { seat: 0 }),
+      seat('bob', 'Bob', 1500, { seat: 2 })
+    ], { phase: 'FLOP' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    const emptySeats = root.querySelectorAll('.empty-seat')
+    expect(emptySeats.length).toBeGreaterThan(0)
+    emptySeats.forEach(button => expect(button.disabled).toBe(true))
   })
 })

@@ -9,7 +9,7 @@ public final class PlayerState {
     private final UUID reconnectToken;
     private final UUID accountId;
     private final String nickname;
-    private final int seat;
+    private int seat;
     private final boolean ai;
     private int chips;
     private int reserveChips;
@@ -53,6 +53,8 @@ public final class PlayerState {
     public UUID accountId() { return accountId; }
     public String nickname() { return nickname; }
     public int seat() { return seat; }
+    /** 换座：把玩家移到另一个座位（范围/占用校验由 PokerTable 负责）。 */
+    public void moveToSeat(int seat) { this.seat = seat; }
     public boolean ai() { return ai; }
     public int chips() { return chips; }
     public int reserveChips() { return reserveChips; }

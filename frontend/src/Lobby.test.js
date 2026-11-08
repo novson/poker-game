@@ -55,18 +55,6 @@ it('does not replace an edited buy-in during a lobby refresh', async () => {
   expect(root.querySelector('.table-row > button').disabled).toBe(true)
 })
 
-it('renders a seat picker with occupied seats disabled and first free seat selected', async () => {
-  api.listTables.mockResolvedValue([{ ...rules, id: 'one', name: '好友桌', phase: 'WAITING', playerCount: 2, maxPlayers: 4, occupiedSeats: [0, 3] }])
-  await mount()
-  const options = root.querySelectorAll('.seat-option')
-  expect(options).toHaveLength(4)
-  expect(options[0].disabled).toBe(true)
-  expect(options[1].disabled).toBe(false)
-  expect(options[2].disabled).toBe(false)
-  expect(options[3].disabled).toBe(true)
-  expect(options[1].classList.contains('selected')).toBe(true)
-})
-
 it('blocks duplicate submission through the entire account and seat lookup', async () => {
   let resolveSeat
   api.createAccount.mockResolvedValue({ accountId: 'a', accountToken: 't', profile: { nickname: '测试玩家', chips: 10000 } })

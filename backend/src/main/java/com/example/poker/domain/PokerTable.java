@@ -304,26 +304,18 @@ public final class PokerTable {
     }
 
     public synchronized PlayerState join(String nickname) {
-        return join(nickname, startingChips, null);
+        return join(nickname, startingChips);
     }
 
     public synchronized PlayerState join(String nickname, Integer buyIn) {
-        return join(nickname, buyIn, null);
-    }
-
-    public synchronized PlayerState join(String nickname, Integer buyIn, Integer seat) {
-        PlayerState player = addPlayer(null, nickname, false, buyIn == null ? startingChips : buyIn, totalChips, seat);
+        PlayerState player = addPlayer(null, nickname, false, buyIn == null ? startingChips : buyIn, totalChips);
         message = joinMessage(nickname);
         return player;
     }
 
     public synchronized PlayerState join(UUID accountId, String nickname, Integer buyIn, int bankroll) {
-        return join(accountId, nickname, buyIn, bankroll, null);
-    }
-
-    public synchronized PlayerState join(UUID accountId, String nickname, Integer buyIn, int bankroll, Integer seat) {
         int requestedBuyIn = buyIn == null ? startingChips : buyIn;
-        PlayerState player = addPlayer(accountId, nickname, false, requestedBuyIn, bankroll, seat);
+        PlayerState player = addPlayer(accountId, nickname, false, requestedBuyIn, bankroll);
         message = joinMessage(nickname);
         return player;
     }
@@ -336,12 +328,12 @@ public final class PokerTable {
 
     public synchronized PlayerState joinAi(String nickname) {
         if (!privateTable) throw new IllegalStateException("只有私人牌桌可以加入 AI");
-        PlayerState player = addPlayer(null, nickname, true, startingChips, totalChips, null);
+        PlayerState player = addPlayer(null, nickname, true, startingChips, totalChips);
         message = nickname + " 已就座";
         return player;
     }
 
-    private PlayerState addPlayer(UUID accountId, String nickname, boolean ai, int buyIn, int bankroll, Integer seat) {
+    private PlayerState addPlayer(UUID accountId, String nickname, boolean ai, int buyIn, int bankroll) {
         // 牌局进行中也可以入座：新玩家状态是 SITTING，不参与当前这手牌，从下一局开始发牌
         if (players.size() >= maxPlayers) throw new IllegalStateException("牌桌已满");
         if (players.stream().anyMatch(player -> player.nickname().equalsIgnoreCase(nickname)))
@@ -349,9 +341,8 @@ public final class PokerTable {
         if (buyIn < minBuyIn || buyIn > maxBuyIn)
             throw new IllegalArgumentException("带入筹码必须在 " + minBuyIn + " 到 " + maxBuyIn + " 之间");
         if (bankroll < buyIn) throw new IllegalArgumentException("账号可用筹码不足");
-        int resolvedSeat = resolveSeat(seat);
         PlayerState player = new PlayerState(UUID.randomUUID(), UUID.randomUUID(), accountId, nickname,
-                resolvedSeat, buyIn, bankroll - buyIn, ai);
+                firstFreeSeat(), buyIn, bankroll - buyIn, ai);
         // 第一个坐下的人就是创建人，只有 TA 能发起本局试算
         if (players.isEmpty()) ownerPlayerId = player.id();
         players.add(player);
@@ -977,14 +968,19 @@ public final class PokerTable {
         throw new IllegalStateException("没有空座位");
     }
 
-    /** 解析入座请求的座位号：null 则自动落第一个空位；否则校验范围与占用。 */
-    private int resolveSeat(Integer requestedSeat) {
-        if (requestedSeat == null) return firstFreeSeat();
-        if (requestedSeat < 0 || requestedSeat >= maxPlayers)
+    /** 换座：把玩家移到目标空座（只能两局之间，且目标座位必须为空且在范围内）。 */
+    public synchronized void changeSeat(UUID playerId, UUID reconnectToken, int targetSeat) {
+        PlayerState player = authenticate(playerId, reconnectToken);
+        if (phase != GamePhase.WAITING && phase != GamePhase.SHOWDOWN)
+            throw new IllegalStateException("只能在两局之间换座");
+        if (targetSeat < 0 || targetSeat >= maxPlayers)
             throw new IllegalArgumentException("座位号无效");
-        if (players.stream().anyMatch(player -> player.seat() == requestedSeat))
+        if (players.stream().anyMatch(seated -> seated.seat() == targetSeat))
             throw new IllegalArgumentException("座位已被占用");
-        return requestedSeat;
+        if (player.seat() == targetSeat) return;
+        player.moveToSeat(targetSeat);
+        players.sort(Comparator.comparingInt(PlayerState::seat));
+        message = player.nickname() + " 换到了座位 " + (targetSeat + 1);
     }
 
     private PlayerState requirePlayer(UUID playerId) {

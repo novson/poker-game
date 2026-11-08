@@ -143,16 +143,11 @@ public class TableService {
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname, Integer buyIn) {
-        return join(tableId, nickname, null, null, buyIn, null);
+        return join(tableId, nickname, null, null, buyIn);
     }
 
     public TableViews.SessionView join(UUID tableId, String nickname, UUID accountId, UUID accountToken,
                                        Integer buyIn) {
-        return join(tableId, nickname, accountId, accountToken, buyIn, null);
-    }
-
-    public TableViews.SessionView join(UUID tableId, String nickname, UUID accountId, UUID accountToken,
-                                       Integer buyIn, Integer seat) {
         AccountService.StoredIdentity identity = accountId == null || accountToken == null
                 ? null : accounts.identity(accountId, accountToken);
         if (identity != null) ensureAccountAvailable(identity.id());
@@ -160,12 +155,21 @@ public class TableService {
             if (table.privateTable()) throw new IllegalArgumentException("私人牌桌不能从大厅加入");
             PlayerState player;
             if (accountId == null || accountToken == null) {
-                player = table.join(nickname.trim(), buyIn, seat);
+                player = table.join(nickname.trim(), buyIn);
             } else {
-                player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips(), seat);
+                player = table.join(identity.id(), identity.nickname(), buyIn, identity.chips());
             }
             publish(tableId);
             return session(table, player);
+        });
+    }
+
+    /** 换座：玩家在牌桌内点击空座位坐到那里（只能两局之间）。 */
+    public TableViews.TableView changeSeat(UUID tableId, UUID playerId, UUID reconnectToken, int seat) {
+        return withTable(tableId, table -> {
+            table.changeSeat(playerId, reconnectToken, seat);
+            publish(tableId);
+            return TableViews.TableView.from(table, playerId);
         });
     }
 

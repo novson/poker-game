@@ -20,7 +20,7 @@ const props = defineProps({
   refreshing: Boolean,
   emoteEvent: Object
 })
-const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'show-cards', 'refresh', 'settle-squid'])
+const emit = defineEmits(['action', 'chips', 'start', 'emote', 'leave', 'settle-leave', 'settle', 'show-cards', 'refresh', 'settle-squid', 'change-seat'])
 const leavePanelOpen = ref(false)
 // 非创建人可以关掉自己眼前的试算面板，但服务端状态不变，刷新后仍会看到
 const settlementDismissed = ref(false)
@@ -731,7 +731,11 @@ onBeforeUnmount(() => {
             </div>
             <span v-if="seat.player.streetBet" class="bet-chip">{{ seat.player.streetBet }}</span>
           </template>
-          <span v-else class="empty-label">空位</span>
+          <button v-else class="empty-seat" type="button"
+            :disabled="!betweenHands || busy"
+            :title="betweenHands ? '点击坐到这个座位' : '牌局进行中不能换座'"
+            :aria-label="`坐到座位 ${seat.actualSeat + 1}`"
+            @click="emit('change-seat', seat.actualSeat)"><span aria-hidden="true">+</span> 空位</button>
         </div>
       </div>
       </div>

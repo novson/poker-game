@@ -92,7 +92,7 @@ Jenkinsfile                              jdk17 / maven3 / node22，mvn verify �
 - 阶段变更顺序：`WAITING → PRE_FLOP → FLOP → TURN → RIVER → SHOWDOWN → WAITING/SHOWDOWN`。
 - `SHOWDOWN` 期间仍允许补码/回收/重连/下一局；不允许 `act`。
 - **局中入座**：只要有空位，任何阶段都可以 `join`。新玩家 `PlayerState.status = SITTING`，不进 `activePlayers()/contenders()`，所以本手不发牌、不行动、不进底池与边池结算，下一局 `start()` 才转为 `ACTIVE` 参与。牌桌 `message` 会提示“已入座，下一局开始参与”。已满座仍然拒绝。
-- **自主选座**：`JoinTable.seat`（0 起，可选）可指定座位，省略则自动落第一个空位（`firstFreeSeat()`）。`PokerTable.resolveSeat()` 校验范围（`[0, maxPlayers)`，否则“座位号无效”）与占用（“座位已被占用”）。大厅列表 `TableSummary.occupiedSeats` 下发已占座位号，前端据此渲染选座器：已占座位禁用、首个空位默认选中。
+- **房间内换座**：入座仍是自动落第一个空位（`firstFreeSeat()`），玩家进桌后在两局之间（`WAITING/SHOWDOWN`）点击空座位换过去。`PokerTable.changeSeat()` 校验范围（`[0, maxPlayers)`，否则“座位号无效”）与占用（“座位已被占用”），换座后按 `seat` 重排 `players`。前端空座位渲染为 `.empty-seat` 按钮，牌局进行中禁用。
 - 动作合法性入口：`PokerTable.act()` 一处统一校验，包括 `acted`/`streetBet`/`raiseAllowed`。
 - 新增动作类型（ActionType 枚举）必须同步更新：前端 `rules.js` 中 `validRaise/canAllIn/quickRaiseTo`、UI `PokerRoom.vue` 行动条、`PokerAiStrategy.decide`、`PokerAdvisor.advise`。
 
@@ -246,6 +246,7 @@ B=http://localhost:8080          # 以下所有示例的基点
 | POST | `/api/tables/{id}/start` | `playerId+token` | 开始下一局（≥2 人有筹码） |
 | POST | `/api/tables/{id}/actions` | `playerId+token` | 提交下注动作 |
 | POST | `/api/tables/{id}/leave` | `playerId+token` | 结算离桌；局中预约本手结束后释放座位 |
+| POST | `/api/tables/{id}/seat` | `playerId+token` | 换座到空座位（只能两局之间） |
 | POST | `/api/tables/{id}/chips/top-up` | `playerId+token` | 桌上补码（备用 → 桌上） |
 | POST | `/api/tables/{id}/chips/cash-out` | `playerId+token` | 回收（桌上 → 备用） |
 | POST | `/api/tables/{id}/emotes` | `playerId+token` | 发送语音表情 |
@@ -773,8 +774,9 @@ mvn -B spring-boot:run
 | 400 `还没轮到你行动` | 当前 playerId 与 `currentTurnSeat` 不匹配 | 等 STOMP 推送新版本后用最新 `currentTurnSeat` |
 | 400 `牌局进行中，暂不能加入` | `phase` 不是 `WAITING/SHOWDOWN` | 在 SHOWDOWN 后再 join，或等下一局 |
 | 400 `牌桌已满` | `players.size() >= maxPlayers` | 客户端把"入座"按钮 disable |
-| 400 `座位已被占用` | 指定 `seat` 已被他人占用 | 前端渲染已占座位为禁用，选中态落到空位 |
-| 400 `座位号无效` | `seat` 超出 `[0, maxPlayers)` | 前端只渲染 `maxPlayers` 个座位按钮 |
+| 400 `座位已被占用` | 换座目标 `seat` 已被他人占用 | 前端空座位才可点，点击前已过滤已占座位 |
+| 400 `座位号无效` | 换座目标 `seat` 超出 `[0, maxPlayers)` | 前端只渲染 `maxPlayers` 个座位 |
+| 400 `只能在两局之间换座` | 手牌进行中调用换座 | 前端牌局进行中禁用空座位按钮 |
 | 400 `带入筹码必须在 X 到 Y 之间` | 违反 `PokerSettings.validate()` | UI 提示并 clamp 到范围 |
 | 400 `账号已有保留座位` | 同一账号在别桌 | 先 `restoreAccountSeat()` 回到原桌 |
 | 400 `私人牌桌不能从大厅加入` | 大厅 join 私人桌 | 应通过 `POST /tables` 创建 + join，或分享邀请码（未实现） |
